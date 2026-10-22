@@ -1,4 +1,4 @@
-"""Desafíos diarios: puzzle del día, la mejor jugada en tus partidas y un reto de visualización."""
+"""Desafíos diarios: puzzle del día y la mejor jugada en tus propias partidas."""
 
 import hashlib
 
@@ -15,7 +15,7 @@ from .puzzles import puzzle_out
 
 router = APIRouter(prefix="/api/daily", tags=["desafíos"])
 
-KINDS = ("puzzle", "own-game", "visual")
+KINDS = ("puzzle", "own-game")
 
 
 def _seed(text: str) -> int:
@@ -61,15 +61,12 @@ def get_daily(user: User = Depends(current_user), db: Session = Depends(get_db))
         c.kind: {"success": c.success, "score": c.score}
         for c in db.scalars(select(DailyChallenge).where(DailyChallenge.user_id == user.id, DailyChallenge.day == today()))
     }
-    best_visual = db.scalar(select(func.max(DailyChallenge.score)).where(
-        DailyChallenge.user_id == user.id, DailyChallenge.kind == "visual"))
     p = daily_puzzle(db)
     return {
         "day": today().isoformat(),
         "puzzle": puzzle_out(p) if p else None,
         "own": own_position(db, user),
         "done": done,
-        "best_visual": best_visual or 0,
     }
 
 
@@ -86,8 +83,5 @@ def complete(kind: str, body: DoneIn, user: User = Depends(current_user), db: Se
         DailyChallenge.user_id == user.id, DailyChallenge.day == today(), DailyChallenge.kind == kind)).first()
     if row is None:
         db.add(DailyChallenge(user_id=user.id, day=today(), kind=kind, success=body.success, score=body.score))
-    elif kind == "visual" and body.score > row.score:
-        # El reto de visualización se puede repetir; se queda la mejor marca del día
-        row.score, row.success = body.score, body.success or row.success
     db.commit()
     return {"ok": True}

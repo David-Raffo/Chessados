@@ -3,7 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import Board from "../components/Board";
 import Promotion from "../components/Promotion";
 import { api } from "../lib/api";
-import { THEME_FILTERS, themeLabel } from "../lib/labels";
+import { THEME_FILTERS, puzzleGoal, themeLabel } from "../lib/labels";
+import { prefs } from "../lib/prefs";
 import type { Puzzle } from "../lib/types";
 import { usePuzzle } from "../lib/usePuzzle";
 import { useActivity } from "../lib/useActivity";
@@ -20,7 +21,9 @@ export default function Puzzles() {
   const review = params.get("review") === "1";
   const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<AttemptResult | null>(null);
+  const [rating, setRating] = useState<number | null>(null);
+  const [lastDelta, setLastDelta] = useState<number | null>(null);
+  const [showGoal, setShowGoal] = useState(prefs.puzzleGoal);
   const [showHint, setShowHint] = useState(false);
   const [session, setSession] = useState({ solved: 0, failed: 0 });
   const [dueCount, setDueCount] = useState(0);
@@ -28,7 +31,6 @@ export default function Puzzles() {
 
   const load = useCallback(() => {
     setError("");
-    setResult(null);
     setShowHint(false);
     const q = new URLSearchParams();
     if (theme) q.set("theme", theme);
@@ -45,6 +47,14 @@ export default function Puzzles() {
 
   useEffect(load, [load]);
 
+  // Tu ELO actual, visible siempre (no solo al terminar un puzzle)
+  useEffect(() => {
+    setLastDelta(null);
+    api<{ ratings: Record<string, { rating: number }> }>("/stats/overview")
+      .then((o) => setRating(o.ratings[area].rating))
+      .catch(() => undefined);
+  }, [area]);
+
   const p = usePuzzle(puzzle, {
     onDone: (solved, seconds) => {
       if (!puzzle) return;
@@ -52,7 +62,11 @@ export default function Puzzles() {
       api<AttemptResult>(`/puzzles/${puzzle.id}/attempt`, {
         body: { solved, seconds, mode: puzzle.review ? "review" : "normal", area },
       })
-        .then(setResult)
+        .then((r) => {
+          setRating(r.rating_after);
+          // Los repasos no mueven el ELO: se conserva el último cambio real
+          if (!puzzle.review) setLastDelta(r.rating_after - r.rating_before);
+        })
         .catch(() => undefined);
     },
   });
@@ -75,7 +89,6 @@ export default function Puzzles() {
     setParams(q);
   }
 
-  const delta = result ? result.rating_after - result.rating_before : 0;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -120,6 +133,18 @@ export default function Puzzles() {
             </span>
           </div>
 
+          <div className="flex items-center justify-between rounded-xl border border-line px-3 py-2 text-sm">
+            <span className="text-muted">Tu ELO de {area === "endgames" ? "finales" : "táctica"}</span>
+            <span className="text-lg font-extrabold">
+              {rating ?? "–"}
+              {lastDelta !== null && (
+                <span className={`ml-1.5 text-sm ${lastDelta > 0 ? "text-good" : lastDelta < 0 ? "text-bad" : "text-muted"}`}>
+                  {lastDelta > 0 ? `+${lastDelta}` : lastDelta === 0 ? "±0" : lastDelta}
+                </span>
+              )}
+            </span>
+          </div>
+
           {error && <p className="text-sm text-bad">{error}</p>}
 
           {puzzle && (
@@ -135,22 +160,23 @@ export default function Puzzles() {
               >
                 {p.status === "intro" && "Mira la jugada del rival…"}
                 {p.status === "play" &&
-                  (p.mistake ? "No es eso. Sigue intentándolo." : `Juegan las ${p.color === "white" ? "blancas" : "negras"}: encuentra la mejor jugada`)}
+                  (p.mistake ? (
+                    "No es eso. Sigue intentándolo."
+                  ) : (
+                    <>
+                      Juegan las {p.color === "white" ? "blancas" : "negras"}
+                      <span className="block text-sm font-normal text-muted">
+                        {showGoal ? puzzleGoal(puzzle.themes) : "Encuentra la mejor jugada"}
+                      </span>
+                    </>
+                  ))}
                 {p.status === "solved" && "¡Correcto!"}
-                {p.status === "failed" && "Puzzle fallado. Volverá a tu cola de repaso."}
+                {p.status === "failed" &&
+                  (p.recovered
+                    ? "¡Bien, ahora sí! Cuenta como fallado y volverá a tu cola de repaso."
+                    : "Puzzle fallado. Volverá a tu cola de repaso.")}
               </div>
 
-              {result && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted">Tu ELO de {area === "endgames" ? "finales" : "táctica"}</span>
-                  <span className="font-bold">
-                    {result.rating_after}{" "}
-                    <span className={delta > 0 ? "text-good" : delta < 0 ? "text-bad" : "text-muted"}>
-                      {delta > 0 ? `+${delta}` : delta === 0 ? "±0" : delta}
-                    </span>
-                  </span>
-                </div>
-              )}
 
               {done ? (
                 <>
@@ -167,9 +193,22 @@ export default function Puzzles() {
                       </span>
                     ))}
                   </div>
-                  <button className="btn-primary w-full" onClick={load}>
-                    Siguiente ↵
-                  </button>
+                  <div className="flex gap-2">
+                    {p.status === "failed" && (
+                      <button
+                        className="btn-ghost flex-1"
+                        onClick={() => {
+                          setShowHint(false);
+                          p.retry();
+                        }}
+                      >
+                        Reintentar
+                      </button>
+                    )}
+                    <button className="btn-primary flex-1" onClick={load}>
+                      Siguiente ↵
+                    </button>
+                  </div>
                 </>
               ) : (
                 <div className="flex gap-2">
@@ -191,6 +230,22 @@ export default function Puzzles() {
             </>
           )}
         </div>
+
+        <label className="card flex cursor-pointer items-center justify-between gap-3 text-sm">
+          <span>
+            <span className="font-semibold">Mostrar el objetivo</span>
+            <span className="block text-muted">«Mate en 2», «Gana material»… Es una pista: Lichess no lo enseña.</span>
+          </span>
+          <input
+            type="checkbox"
+            className="h-5 w-5"
+            checked={showGoal}
+            onChange={(e) => {
+              prefs.puzzleGoal = e.target.checked;
+              setShowGoal(e.target.checked);
+            }}
+          />
+        </label>
 
         <div className="card space-y-2">
           <div className="text-sm font-semibold text-muted">Entrenar un tema</div>

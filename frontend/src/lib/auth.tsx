@@ -5,8 +5,8 @@ import type { User } from "./types";
 interface AuthState {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (data: { name: string; email: string; password: string; level: number }) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  register: (data: { username: string; password: string; level: number }) => Promise<void>;
   logout: () => void;
   setUser: (u: User) => void;
 }
@@ -25,13 +25,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const r = await api<{ token: string; user: User }>("/auth/login", { body: { email, password } });
+  const login = useCallback(async (username: string, password: string) => {
+    const r = await api<{ token: string; user: User }>("/auth/login", { body: { username, password } });
     setToken(r.token);
     setUser(r.user);
   }, []);
 
-  const register = useCallback(async (data: { name: string; email: string; password: string; level: number }) => {
+  const register = useCallback(async (data: { username: string; password: string; level: number }) => {
     const r = await api<{ token: string; user: User }>("/auth/register", { body: data });
     setToken(r.token);
     setUser(r.user);

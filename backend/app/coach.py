@@ -227,7 +227,7 @@ def today_plan(db: Session, user: User) -> dict:
     }
     order = behind + [a for a in sorted(available, key=lambda a: -split.get(a, 0)) if a not in behind]
     candidates = []
-    if not daily_done:
+    if not daily_done and daily_available(db, user):
         candidates.append({"area": "tactics", "kind": "daily", "minutes": 5, "title": "Desafíos del día"})
     if pending:
         candidates.append({"area": "play", "kind": "review", "minutes": 10, "title": "Revisa tu última partida",
@@ -252,6 +252,12 @@ def today_plan(db: Session, user: User) -> dict:
 
     return {"minutes": minutes, "split": split, "steps": steps, "advice": advice,
             "weak_themes": weak_themes(db, user.id)}
+
+
+def daily_available(db: Session, user: User) -> bool:
+    from .routers.daily import daily_puzzle, own_position  # import diferido: evita ciclo con routers
+
+    return daily_puzzle(db) is not None or own_position(db, user) is not None
 
 
 def review_locked(db: Session, user: User) -> Game | None:

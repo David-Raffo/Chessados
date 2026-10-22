@@ -101,6 +101,20 @@ export const THEME_FILTERS = [
   "trappedPiece", "intermezzo", "quietMove", "zugzwang",
 ];
 
+/** Objetivo del puzzle a partir de sus temas de Lichess (es una pista, por eso es opcional). */
+export function puzzleGoal(themes: string[]): string {
+  const mate = themes.find((t) => /^mateIn\d$/.test(t));
+  if (mate) {
+    const n = Number(mate.slice(6));
+    return n >= 5 ? "Da mate en 5 o más" : `Mate en ${n}`;
+  }
+  if (themes.includes("mate")) return "Da mate";
+  if (themes.includes("equality")) return "Salva la posición";
+  if (themes.includes("crushing")) return "Consigue una ventaja decisiva";
+  if (themes.includes("advantage")) return "Consigue ventaja";
+  return "Encuentra la mejor jugada";
+}
+
 export const themeLabel = (t: string) => THEMES[t] ?? t;
 
 export const CLASS_LABEL: Record<string, string> = {

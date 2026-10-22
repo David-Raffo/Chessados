@@ -43,6 +43,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
     try {
       const data = await res.json();
       msg = typeof data.detail === "string" ? data.detail : data.detail?.[0]?.msg ?? msg;
+      msg = msg.replace(/^Value error, /, ""); // prefijo de las validaciones de pydantic
     } catch {
       /* respuesta sin JSON */
     }

@@ -4,7 +4,7 @@ export type RatingArea = "play" | "tactics" | "endgames" | "rush";
 export interface User {
   id: number;
   name: string;
-  email: string;
+  username: string;
   weekly_hours: number;
   target_split: Record<Area, number>;
   ladder_elo: number;
@@ -66,6 +66,11 @@ export interface PlanStep {
   theme?: string | null;
   game_id?: number;
   lesson_id?: string;
+  progress?: number;
+  done?: boolean;
+  status?: string;
+  seconds?: number;
+  target_seconds?: number;
 }
 
 export interface Advice {

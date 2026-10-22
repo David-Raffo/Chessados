@@ -25,7 +25,7 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(80))
-    email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(30), unique=True, index=True)  # siempre en minúsculas
     password_hash: Mapped[str] = mapped_column(String(200))
     weekly_hours: Mapped[float] = mapped_column(Float, default=7.0)
     target_split: Mapped[dict] = mapped_column(JSON, default=lambda: dict(DEFAULT_SPLIT))
@@ -128,6 +128,19 @@ class PuzzleAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PuzzleAssignment(Base):
+    """Puzzle en curso por filtro: se mantiene al recargar hasta que lo resuelves o lo fallas."""
+
+    __tablename__ = "puzzle_assignments"
+    __table_args__ = (UniqueConstraint("user_id", "filter_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    filter_key: Mapped[str] = mapped_column(String(60))  # área|tema
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ReviewItem(Base):
     """Cola de repetición espaciada (puzzles fallados, líneas de apertura, finales)."""
 
@@ -227,6 +240,19 @@ class DailyChallenge(Base):
     kind: Mapped[str] = mapped_column(String(20))  # puzzle, own-game, visual
     success: Mapped[bool] = mapped_column(Boolean)
     score: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DailyPlan(Base):
+    """Sesión «Entrenar hoy» fijada al generarse por primera vez en el día."""
+
+    __tablename__ = "daily_plans"
+    __table_args__ = (UniqueConstraint("user_id", "day"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    day: Mapped[date] = mapped_column(Date)
+    steps: Mapped[list] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

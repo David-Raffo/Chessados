@@ -38,20 +38,11 @@ export const prefs = {
   set sound(v: boolean) {
     write("sound", v ? "on" : "off");
   },
+  /** Mostrar el objetivo del puzzle («Mate en 2», «Gana material»…) antes de resolverlo */
+  get puzzleGoal() {
+    return read("puzzle-goal", "off") === "on";
+  },
+  set puzzleGoal(v: boolean) {
+    write("puzzle-goal", v ? "on" : "off");
+  },
 };
-
-/** Pasos de «Entrenar hoy» ya empezados hoy, para marcarlos como hechos. */
-export function planDone(): string[] {
-  try {
-    const data = JSON.parse(read("plan-done", "{}"));
-    return data.date === new Date().toDateString() ? data.steps : [];
-  } catch {
-    return [];
-  }
-}
-
-export function markPlanStep(key: string) {
-  const steps = new Set(planDone());
-  steps.add(key);
-  write("plan-done", JSON.stringify({ date: new Date().toDateString(), steps: [...steps] }));
-}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Chess } from "chess.js";
 import confetti from "canvas-confetti";
@@ -27,10 +27,9 @@ interface DailyData {
   puzzle: Puzzle | null;
   own: Own | null;
   done: Record<string, { success: boolean; score: number }>;
-  best_visual: number;
 }
 
-type Kind = "puzzle" | "own-game" | "visual";
+type Kind = "puzzle" | "own-game";
 
 export default function Daily() {
   const [data, setData] = useState<DailyData | null>(null);
@@ -42,12 +41,11 @@ export default function Daily() {
     load();
   }, []);
 
-  function complete(kind: Kind, success: boolean, score = 0) {
-    api(`/daily/${kind}`, { body: { success, score } }).then(load);
+  function complete(kind: Kind, success: boolean) {
+    api(`/daily/${kind}`, { body: { success } }).then(load);
   }
 
   if (!data) return <p className="text-muted">Cargando desafíos…</p>;
-  const doneCount = Object.keys(data.done).length;
 
   const cards: { kind: Kind; title: string; text: string; available: boolean }[] = [
     { kind: "puzzle", title: "Puzzle del día", text: "El mismo para toda la casa. Un intento.", available: !!data.puzzle },
@@ -57,8 +55,9 @@ export default function Daily() {
       text: data.own ? "Una posición de tus partidas donde te equivocaste." : "Juega o importa partidas analizadas para desbloquearlo.",
       available: !!data.own,
     },
-    { kind: "visual", title: "Visualización: coordenadas", text: `30 segundos para encontrar casillas. Récord: ${data.best_visual}.`, available: true },
   ];
+  const available = cards.filter((c) => c.available);
+  const doneCount = available.filter((c) => data.done[c.kind]).length;
 
   return (
     <div className="space-y-6">
@@ -68,12 +67,14 @@ export default function Daily() {
           <p className="text-muted">Retos cortos que mantienen tu racha aunque hoy tengas poco tiempo.</p>
         </div>
         <div className="card px-4 py-2 text-center">
-          <div className="text-2xl font-extrabold">{doneCount}/3</div>
+          <div className="text-2xl font-extrabold">
+            {doneCount}/{available.length}
+          </div>
           <div className="text-xs text-muted">hechos hoy</div>
         </div>
       </header>
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2">
         {cards.map((c) => {
           const d = data.done[c.kind];
           return (
@@ -99,7 +100,6 @@ export default function Daily() {
       {open === "own-game" && data.own && (
         <OwnGame own={data.own} done={data.done["own-game"]} onDone={(ok) => complete("own-game", ok)} />
       )}
-      {open === "visual" && <Coordinates onDone={(score) => complete("visual", score >= 10, score)} best={data.best_visual} />}
     </div>
   );
 }
@@ -191,100 +191,6 @@ function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean };
         <Link className="text-sm underline" to={`/revision/${own.game_id}`}>
           Ver la partida
         </Link>
-      </aside>
-    </div>
-  );
-}
-
-const FILES = "abcdefgh";
-
-function Coordinates({ onDone, best }: { onDone: (score: number) => void; best: number }) {
-  const [running, setRunning] = useState(false);
-  const [orientation, setOrientation] = useState<Color>("white");
-  const [target, setTarget] = useState("e4");
-  const [score, setScore] = useState(0);
-  const [left, setLeft] = useState(30_000);
-  const [flash, setFlash] = useState<{ sq: string; ok: boolean } | null>(null);
-  const [last, setLast] = useState<number | null>(null);
-  const scoreRef = useRef(0);
-
-  const randomSquare = () => `${FILES[Math.floor(Math.random() * 8)]}${1 + Math.floor(Math.random() * 8)}`;
-
-  function start() {
-    setOrientation(Math.random() < 0.5 ? "white" : "black");
-    scoreRef.current = 0;
-    setScore(0);
-    setTarget(randomSquare());
-    setLeft(30_000);
-    setLast(null);
-    setRunning(true);
-  }
-
-  useEffect(() => {
-    if (!running) return;
-    const end = performance.now() + 30_000;
-    const id = window.setInterval(() => {
-      const ms = end - performance.now();
-      setLeft(Math.max(0, ms));
-      if (ms <= 0) {
-        window.clearInterval(id);
-        setRunning(false);
-        setLast(scoreRef.current);
-        onDone(scoreRef.current);
-        if (scoreRef.current > best) confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 }, disableForReducedMotion: true });
-      }
-    }, 100);
-    return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running]);
-
-  function click(sq: string) {
-    if (!running) return;
-    const ok = sq === target;
-    setFlash({ sq, ok });
-    window.setTimeout(() => setFlash(null), 250);
-    if (ok) {
-      scoreRef.current += 1;
-      setScore(scoreRef.current);
-      setTarget(randomSquare());
-    } else sound.bad();
-  }
-
-  const ranks = orientation === "white" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8];
-  const files = orientation === "white" ? FILES.split("") : FILES.split("").reverse();
-
-  return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
-      <div className="relative mx-auto aspect-square w-full max-w-[min(100%,calc(100vh-14rem))]">
-        <div className="grid h-full w-full grid-cols-8 overflow-hidden rounded-md">
-          {ranks.map((r) =>
-            files.map((f) => {
-              const sq = `${f}${r}`;
-              const light = (FILES.indexOf(f) + r) % 2 === 1;
-              const fl = flash?.sq === sq ? (flash.ok ? "bg-good" : "bg-bad") : light ? "bg-[#f0d9b5]" : "bg-[#b58863]";
-              return <button key={sq} aria-label={sq} className={`${fl} transition-colors`} onClick={() => click(sq)} />;
-            }),
-          )}
-        </div>
-        {running && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="rounded-2xl bg-black/60 px-6 py-2 text-6xl font-extrabold text-white">{target}</span>
-          </div>
-        )}
-      </div>
-      <aside className="card h-fit space-y-3">
-        <h2 className="font-bold">Visualización: coordenadas</h2>
-        <p className="text-sm text-muted">
-          Haz clic en la casilla que aparece. El tablero puede salir desde el lado de las negras. 10 aciertos completan el reto.
-        </p>
-        <div className="flex justify-between text-2xl font-extrabold tabular-nums">
-          <span>{score}</span>
-          <span className={left < 5000 ? "text-bad" : ""}>{(left / 1000).toFixed(1)}s</span>
-        </div>
-        {last !== null && <p className={last >= 10 ? "font-semibold text-good" : "text-muted"}>Has hecho {last}. Récord: {Math.max(best, last)}.</p>}
-        <button className="btn-primary w-full" onClick={start} disabled={running}>
-          {last === null ? "Empezar" : "Otra vez"}
-        </button>
       </aside>
     </div>
   );

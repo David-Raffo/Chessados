@@ -4,7 +4,7 @@ import Ring from "../components/Ring";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { AREA_BG, AREA_COLOR_VAR, AREA_LABEL, AREA_TEXT, formatDuration, themeLabel } from "../lib/labels";
-import { markPlanStep, planDone } from "../lib/prefs";
+import { setActiveStep, stepLink } from "../lib/plan";
 import type { Area, CoachPlan, PlanStep, RatingArea } from "../lib/types";
 
 interface Overview {
@@ -17,39 +17,12 @@ interface Overview {
 
 const stepKey = (s: PlanStep, i: number) => `${i}-${s.kind}-${s.area}`;
 
-function stepLink(s: PlanStep): string {
-  switch (s.kind) {
-    case "puzzles": {
-      const q = new URLSearchParams();
-      if (s.area === "endgames") q.set("area", "endgames");
-      if (s.theme && s.theme !== "endgame") q.set("theme", s.theme);
-      const qs = q.toString();
-      return `/puzzles${qs ? `?${qs}` : ""}`;
-    }
-    case "game":
-      return "/jugar?tc=15%2B10";
-    case "review":
-      return s.game_id ? `/revision/${s.game_id}` : "/partidas";
-    case "rush":
-      return "/contrarreloj";
-    case "endgame":
-      return s.lesson_id ? `/finales/${s.lesson_id}` : "/finales";
-    case "openings":
-      return "/aperturas?tab=train";
-    case "woodpecker":
-      return "/woodpecker";
-    case "daily":
-      return "/retos";
-  }
-}
-
 export default function Home() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [plan, setPlan] = useState<CoachPlan | null>(null);
   const [puzzleCount, setPuzzleCount] = useState<number | null>(null);
-  const [done, setDone] = useState<string[]>(planDone());
 
   useEffect(() => {
     api<Overview>("/stats/overview").then(setOverview).catch(() => undefined);
@@ -57,13 +30,14 @@ export default function Home() {
     api<{ count: number }>("/puzzles/count").then((r) => setPuzzleCount(r.count)).catch(() => undefined);
   }, []);
 
-  function go(step: PlanStep, i: number) {
-    markPlanStep(stepKey(step, i));
-    setDone(planDone());
+  // Un paso solo cuenta como hecho cuando el servidor ve la actividad real (tiempo, partida, revisión…)
+  const go = (step: PlanStep, i: number) => {
+    setActiveStep(i); // activa la barra de «Entrenamiento en curso» en el resto de pantallas
     navigate(stepLink(step));
-  }
-
-  const nextIndex = plan ? plan.steps.findIndex((s, i) => !done.includes(stepKey(s, i))) : -1;
+  };
+  const nextIndex = plan ? plan.steps.findIndex((s) => !s.done) : -1;
+  const started = !!plan?.steps.some((s) => (s.progress ?? 0) > 0);
+  const finished = !!plan && nextIndex === -1;
   const hour = new Date().getHours();
   const greeting = hour < 14 ? "Buenos días" : hour < 21 ? "Buenas tardes" : "Buenas noches";
 
@@ -110,15 +84,15 @@ export default function Home() {
             disabled={!plan}
             onClick={() => {
               if (!plan) return;
-              const i = nextIndex >= 0 ? nextIndex : 0;
+              const i = finished ? 0 : nextIndex;
               go(plan.steps[i], i);
             }}
           >
-            {nextIndex === -1 && plan ? "Repetir sesión" : done.length ? "Continuar entrenamiento" : "Entrenar hoy"} →
+            {finished ? "¡Sesión completada! Seguir entrenando" : started ? "Continuar entrenamiento" : "Entrenar hoy"} →
           </button>
           <ol className="space-y-2">
             {plan?.steps.map((s, i) => {
-              const isDone = done.includes(stepKey(s, i));
+              const isDone = !!s.done;
               return (
                 <li key={stepKey(s, i)}>
                   <button
@@ -134,11 +108,18 @@ export default function Home() {
                     >
                       {isDone ? "✓" : i + 1}
                     </span>
-                    <span className={`flex-1 font-medium ${isDone ? "text-muted line-through" : ""}`}>
-                      {s.title}
-                      {s.theme && s.theme !== "endgame" && <span className="text-muted"> · {themeLabel(s.theme)}</span>}
+                    <span className="min-w-0 flex-1">
+                      <span className={`block font-medium ${isDone ? "text-muted line-through" : ""}`}>
+                        {s.title}
+                        {s.theme && s.theme !== "endgame" && <span className="text-muted"> · {themeLabel(s.theme)}</span>}
+                      </span>
+                      {!isDone && (s.progress ?? 0) > 0 && (
+                        <span className="mt-1 block h-1 overflow-hidden rounded-full bg-panel2">
+                          <span className="block h-full" style={{ width: `${(s.progress ?? 0) * 100}%`, background: AREA_COLOR_VAR[s.area] }} />
+                        </span>
+                      )}
                     </span>
-                    <span className="text-sm text-muted">{s.minutes} min</span>
+                    <span className="shrink-0 text-right text-sm text-muted">{s.status ?? `${s.minutes} min`}</span>
                   </button>
                 </li>
               );

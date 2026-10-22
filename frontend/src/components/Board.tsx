@@ -41,6 +41,20 @@ export default function Board({
   const onMoveRef = useRef(onMove);
   onMoveRef.current = onMove;
 
+  // Estado que el tablero debe mostrar según la app. Tras cada jugada se vuelve a aplicar: si la
+  // jugada se ha rechazado (fallo en un puzzle, jugada ilegal, promoción cancelada) la posición
+  // no cambia, React no repinta y sin esto la pieza se quedaría donde la soltaste.
+  const config = {
+    fen,
+    orientation,
+    turnColor: turnColor ?? ((fen.split(" ")[1] === "b" ? "black" : "white") as Color),
+    lastMove: lastMove as Key[] | undefined,
+    check: check ?? false,
+    movable: { color: movable, dests: movable ? dests : new Map<Key, Key[]>() },
+  };
+  const configRef = useRef(config);
+  configRef.current = config;
+
   useEffect(() => {
     if (!el.current) return;
     cg.current = Chessground(el.current, {
@@ -51,21 +65,20 @@ export default function Board({
       movable: {
         free: false,
         showDests: true,
-        events: { after: (orig, dest) => onMoveRef.current?.(orig, dest) },
+        events: {
+          after: (orig, dest) => {
+            onMoveRef.current?.(orig, dest);
+            // Después de que React procese la jugada, el tablero vuelve a la posición real
+            window.setTimeout(() => cg.current?.set(configRef.current), 0);
+          },
+        },
       },
     });
     return () => cg.current?.destroy();
   }, []);
 
   useEffect(() => {
-    cg.current?.set({
-      fen,
-      orientation,
-      turnColor: turnColor ?? (fen.split(" ")[1] === "b" ? "black" : "white"),
-      lastMove: lastMove as Key[] | undefined,
-      check: check ?? false,
-      movable: { color: movable, dests: movable ? dests : new Map() },
-    });
+    cg.current?.set(configRef.current);
   }, [fen, orientation, turnColor, movable, dests, lastMove, check]);
 
   useEffect(() => {

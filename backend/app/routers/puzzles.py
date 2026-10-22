@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import current_user
 from ..db import get_db
-from ..models import Puzzle, PuzzleAttempt, ReviewItem, RushRun, User
+from ..models import Puzzle, PuzzleAssignment, PuzzleAttempt, ReviewItem, RushRun, User
 from ..services import apply_result, current_rating, today
 
 router = APIRouter(prefix="/api/puzzles", tags=["puzzles"])
@@ -48,12 +48,23 @@ def next_puzzle(
         item = db.scalars(
             select(ReviewItem)
             .where(ReviewItem.user_id == user.id, ReviewItem.kind == "puzzle", ReviewItem.due_date <= today())
-            .order_by(ReviewItem.due_date)
+            .order_by(ReviewItem.due_date, ReviewItem.id)
             .limit(1)
         ).first()
         if item and (p := db.get(Puzzle, item.ref_id)):
             return {**puzzle_out(p), "review": True}
         raise HTTPException(404, "No tienes puzzles pendientes de repaso")
+
+    # Si ya tenías un puzzle asignado con este filtro y no lo has terminado, sigue siendo el mismo
+    key = f"{area}|{theme or ''}"
+    assigned = db.scalars(select(PuzzleAssignment).where(
+        PuzzleAssignment.user_id == user.id, PuzzleAssignment.filter_key == key)).first()
+    if assigned:
+        p = db.get(Puzzle, assigned.puzzle_id)
+        done = db.scalar(select(func.count()).select_from(PuzzleAttempt).where(
+            PuzzleAttempt.user_id == user.id, PuzzleAttempt.puzzle_id == assigned.puzzle_id))
+        if p and not done:
+            return {**puzzle_out(p), "review": False}
 
     rating, _, _ = current_rating(db, user.id, "endgames" if area == "endgames" else "tactics")
     attempted = exists().where(PuzzleAttempt.user_id == user.id, PuzzleAttempt.puzzle_id == Puzzle.id)
@@ -65,6 +76,11 @@ def next_puzzle(
             q = q.where(_theme_filter(theme))
         p = db.scalars(q.order_by(func.random()).limit(1)).first()
         if p:
+            if assigned:
+                assigned.puzzle_id = p.id
+            else:
+                db.add(PuzzleAssignment(user_id=user.id, filter_key=key, puzzle_id=p.id))
+            db.commit()
             return {**puzzle_out(p), "review": False}
     raise HTTPException(404, "No hay puzzles disponibles. ¿Se ha ejecutado el importador?")
 

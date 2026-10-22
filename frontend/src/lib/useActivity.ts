@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { api } from "./api";
+import { notifySynced, setUnsent } from "./live";
 import type { Area } from "./types";
 
 const IDLE_MS = 2 * 60 * 1000; // tras 2 minutos sin interacción el contador se pausa
@@ -16,7 +17,8 @@ export function useActivity(area: Area | null, activity: string, refId?: string 
     if (!area) return;
     let sessionId: number | null = null;
     let active = 0;
-    let sent = 0;
+    let sent = 0; // enviado (puede estar en vuelo)
+    let confirmed = 0; // confirmado por el servidor
     let stopped = false;
     lastInteraction.current = Date.now();
 
@@ -33,12 +35,22 @@ export function useActivity(area: Area | null, activity: string, refId?: string 
 
     const beat = (keepalive = false) => {
       if (sessionId == null || active === sent) return;
-      sent = active;
-      api(`/sessions/${sessionId}/beat`, { body: { active_seconds: active }, keepalive }).catch(() => undefined);
+      const value = active;
+      sent = value;
+      api(`/sessions/${sessionId}/beat`, { body: { active_seconds: value }, keepalive })
+        .then(() => {
+          confirmed = Math.max(confirmed, value);
+          setUnsent(area, activity, stopped ? 0 : active - confirmed);
+          notifySynced();
+        })
+        .catch(() => undefined);
     };
 
     const tick = window.setInterval(() => {
-      if (document.visibilityState === "visible" && Date.now() - lastInteraction.current < IDLE_MS) active += 1;
+      if (document.visibilityState === "visible" && Date.now() - lastInteraction.current < IDLE_MS) {
+        active += 1;
+        setUnsent(area, activity, active - confirmed);
+      }
     }, 1000);
     const beater = window.setInterval(() => beat(), BEAT_MS);
     const onHide = () => document.visibilityState === "hidden" && beat(true);

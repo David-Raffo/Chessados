@@ -131,4 +131,6 @@ def weekly_report(user: User = Depends(current_user), db: Session = Depends(get_
 
 @router.get("/coach/today")
 def coach_today(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return today_plan(db, user)
+    from ..plan import plan_for_today  # import diferido: plan importa routers.daily
+
+    return plan_for_today(db, user)

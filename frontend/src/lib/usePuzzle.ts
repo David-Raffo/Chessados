@@ -17,6 +17,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
   const [idx, setIdx] = useState(0);
   const [status, setStatus] = useState<PuzzleStatus>("intro");
   const [mistake, setMistake] = useState(false); // ya ha fallado una vez (el puzzle cuenta como fallado)
+  const [recovered, setRecovered] = useState(false); // lo terminó bien tras fallar o reintentar
   const [flash, setFlash] = useState<"good" | "bad" | null>(null);
   const [promo, setPromo] = useState<{ from: Key; to: Key } | null>(null);
   const startedAt = useRef(0);
@@ -53,6 +54,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     setIdx(0);
     setStatus("intro");
     setMistake(false);
+    setRecovered(false);
     setFlash(null);
     reported.current = false;
     const t = window.setTimeout(() => {
@@ -104,10 +106,9 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
       if (next >= puzzle.moves.length || chess.current.isCheckmate()) {
         setIdx(puzzle.moves.length);
         setStatus(mistake ? "failed" : "solved");
-        if (!mistake) {
-          setFlash("good");
-          sound.good();
-        }
+        setRecovered(mistake);
+        setFlash("good");
+        sound.good();
         report(!mistake);
         return;
       }
@@ -134,6 +135,18 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     setIdx(puzzle.moves.length);
   }, [apply, idx, puzzle, report, status]);
 
+  /** Vuelve a la posición inicial del puzzle para intentarlo de nuevo (ya cuenta como fallado). */
+  const retry = useCallback(() => {
+    if (!puzzle) return;
+    chess.current = new Chess(puzzle.fen);
+    apply(puzzle.moves[0]);
+    setIdx(1);
+    setMistake(true);
+    setRecovered(false);
+    setFlash(null);
+    setStatus("play");
+  }, [apply, puzzle]);
+
   const hint = useMemo((): Key | null => {
     if (!puzzle || status !== "play" || idx >= puzzle.moves.length) return null;
     return puzzle.moves[idx].slice(0, 2) as Key;
@@ -147,6 +160,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     color,
     status,
     mistake,
+    recovered,
     flash,
     promo,
     setPromo,
@@ -156,6 +170,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     userMove,
     fail,
     showSolution,
+    retry,
     turn: (chess.current.turn() === "w" ? "white" : "black") as Color,
     resetPromo: () => {
       setPromo(null);

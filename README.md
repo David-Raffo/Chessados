@@ -28,7 +28,7 @@ La primera vez, el contenedor `importer` descarga en streaming los puzzles de Li
 | Finales | 14 lecciones teóricas (mates básicos, rey y peón, oposición, Lucena, Philidor…) contra Stockfish a máxima fuerza, con ELO de finales y repaso espaciado |
 | Aperturas | Repertorio propio en árbol, entrenamiento SM-2, nombres de `chess-openings` y detección de dónde te sales en tus partidas |
 | Woodpecker | Bloques de 100–300 puzzles en ciclos cada vez más cortos |
-| Desafíos diarios | Puzzle del día, «encuentra la mejor jugada» en tus partidas y reto de coordenadas; mantienen la racha |
+| Desafíos diarios | Puzzle del día y «encuentra la mejor jugada» en tus propias partidas; mantienen la racha |
 | Entrenador | Reglas 1–5 de la guía, sesión «Entrenar hoy» e informe semanal |
 | Progreso | Curvas de ELO, mapa de calor, horas frente a objetivo, radar de temas y errores por fase |
 

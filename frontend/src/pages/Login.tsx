@@ -10,8 +10,7 @@ const LEVELS = [
 export default function Login() {
   const { login, register } = useAuth();
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [level, setLevel] = useState(1200);
   const [error, setError] = useState("");
@@ -22,8 +21,8 @@ export default function Login() {
     setError("");
     setBusy(true);
     try {
-      if (mode === "login") await login(email, password);
-      else await register({ name, email, password, level });
+      if (mode === "login") await login(username, password);
+      else await register({ username, password, level });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -55,22 +54,26 @@ export default function Login() {
           ))}
         </div>
 
-        {mode === "register" && (
-          <div>
-            <label className="label">Nombre</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
-          </div>
-        )}
         <div>
-          <label className="label">Email</label>
-          <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <label className="label">Usuario</label>
+          <input
+            className="input"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
+            autoCapitalize="none"
+            minLength={3}
+            maxLength={30}
+            required
+          />
         </div>
         <div>
           <label className="label">Contraseña</label>
           <input
             className="input"
             type="password"
-            minLength={6}
+            minLength={4}
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required

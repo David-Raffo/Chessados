@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -12,19 +14,33 @@ from ..services import seed_ratings
 router = APIRouter(prefix="/api", tags=["usuarios"])
 
 
-# Validación laxa a propósito: en una instalación casera vale cualquier "algo@algo"
-EMAIL = r"^[^@\s]+@[^@\s]+$"
+# Letras (con acentos), números, punto, guion y guion bajo
+USERNAME = re.compile(r"[\w.-]{3,30}")
 
 
 class RegisterIn(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    email: str = Field(pattern=EMAIL, max_length=200)
-    password: str = Field(min_length=6, max_length=200)
+    username: str
+    password: str = Field(max_length=200)
     level: int = Field(default=1200, ge=400, le=2500)
+
+    @field_validator("username")
+    @classmethod
+    def valid_username(cls, v: str) -> str:
+        v = v.strip()
+        if not USERNAME.fullmatch(v):
+            raise ValueError("El usuario debe tener de 3 a 30 letras, números, puntos, guiones o guiones bajos")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def valid_password(cls, v: str) -> str:
+        if len(v) < 4:
+            raise ValueError("La contraseña debe tener al menos 4 caracteres")
+        return v
 
 
 class LoginIn(BaseModel):
-    email: str = Field(max_length=200)
+    username: str = Field(max_length=30)
     password: str
 
 
@@ -42,7 +58,7 @@ def user_out(u: User) -> dict:
     return {
         "id": u.id,
         "name": u.name,
-        "email": u.email,
+        "username": u.username,
         "weekly_hours": u.weekly_hours,
         "target_split": {**DEFAULT_SPLIT, **(u.target_split or {})},
         "ladder_elo": u.ladder_elo,
@@ -55,12 +71,12 @@ def user_out(u: User) -> dict:
 
 @router.post("/auth/register")
 def register(body: RegisterIn, db: Session = Depends(get_db)):
-    email = body.email.lower()
-    if db.scalar(select(func.count()).select_from(User).where(User.email == email)):
-        raise HTTPException(400, "Ya existe una cuenta con ese email")
+    username = body.username.strip().lower()
+    if db.scalar(select(func.count()).select_from(User).where(User.username == username)):
+        raise HTTPException(400, "Ese nombre de usuario ya está en uso")
     user = User(
-        name=body.name.strip(),
-        email=email,
+        name=body.username.strip(),
+        username=username,
         password_hash=hash_password(body.password),
         ladder_elo=max(800, min(2400, body.level)),
         target_split=dict(DEFAULT_SPLIT),
@@ -74,9 +90,9 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
 
 @router.post("/auth/login")
 def login(body: LoginIn, db: Session = Depends(get_db)):
-    user = db.scalars(select(User).where(User.email == body.email.lower())).first()
+    user = db.scalars(select(User).where(User.username == body.username.strip().lower())).first()
     if not user or not verify_password(body.password, user.password_hash):
-        raise HTTPException(401, "Email o contraseña incorrectos")
+        raise HTTPException(401, "Usuario o contraseña incorrectos")
     return {"token": create_token(user.id), "user": user_out(user)}
 
 

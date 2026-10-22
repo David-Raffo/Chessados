@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import PlanBanner from "./PlanBanner";
 
 export const MODULES = [
   { to: "/", label: "Inicio", icon: "M3 11l9-8 9 8v10a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1z" },
@@ -59,6 +60,7 @@ export default function Layout() {
       </aside>
 
       <main className="min-w-0 flex-1 px-4 pb-24 pt-4 md:px-8 md:pb-8 md:pt-8">
+        <PlanBanner />
         <div className="mx-auto max-w-6xl">
           <Outlet />
         </div>
