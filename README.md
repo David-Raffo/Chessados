@@ -12,9 +12,10 @@ docker compose up -d --build
 
 Abre <http://localhost:8080> y crea una cuenta. Cada persona de casa puede tener la suya.
 
-La primera vez, el contenedor `importer` descarga en streaming los puzzles de Lichess y guarda los
-150.000 más populares (tarda menos de un minuto). Si quieres más, sube `PUZZLE_LIMIT` en `.env`
-(`0` = todos) y ejecuta `docker compose run --rm importer`. También puedes dejar el fichero
+La primera vez, el contenedor `importer` descarga en streaming los puzzles de Lichess y guarda
+1 millón de los bien valorados y muy jugados (tarda unos minutos). Para cambiarlo, ajusta `PUZZLE_LIMIT`
+en `.env` (`0` = todos los que pasan el filtro) y ejecuta `docker compose run --rm importer`: solo añade
+los que falten. También puedes dejar el fichero
 `lichess_db_puzzle.csv.zst` en `data/` para no descargarlo.
 
 ## Qué incluye

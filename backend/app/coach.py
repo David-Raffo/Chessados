@@ -1,6 +1,6 @@
 """Entrenador por reglas simples y transparentes (sin IA externa)."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -61,14 +61,18 @@ def weak_themes(db: Session, user_id: int) -> list[dict]:
     return sorted(stats, key=lambda x: x["accuracy"])[:3]
 
 
-def blunder_phases(db: Session, user_id: int, days: int = 30) -> dict[str, int]:
-    since = local_midnight(today() - timedelta(days=days))
+def blunder_phases(db: Session, user_id: int, days: int = 30, not_before: date | None = None) -> dict[str, int]:
+    """Errores graves por fase en partidas jugadas en los últimos `days` días (y no antes de `not_before`)."""
+    start = today() - timedelta(days=days)
+    if not_before and not_before > start:
+        start = not_before
+    since = local_midnight(start)
     rows = db.execute(
         select(GameAnalysis.phase, func.count())
         .join(Game, Game.id == GameAnalysis.game_id)
         .where(
             Game.user_id == user_id,
-            Game.created_at >= since,
+            Game.played_at >= since,  # fecha de la partida, no de la importación
             GameAnalysis.is_user_move.is_(True),
             GameAnalysis.classification == "blunder",
         )
@@ -130,8 +134,10 @@ def today_plan(db: Session, user: User) -> dict:
     advice: list[dict] = []
     minutes = max(30, min(120, round(user.weekly_hours * 60 / 7 / 5) * 5))
 
-    # Regla 3: demasiados errores graves en el final
-    phases = blunder_phases(db, user.id)
+    # Regla 3: demasiados errores graves en el final. Tras un refuerzo de dos semanas solo cuentan
+    # los errores de partidas posteriores a su inicio; si no, los mismos errores lo reactivarían siempre.
+    boost_start = user.endgame_boost_until - timedelta(days=14) if user.endgame_boost_until else None
+    phases = blunder_phases(db, user.id, not_before=boost_start)
     n_blunders = sum(phases.values())
     if n_blunders >= 5 and phases.get("endgame", 0) / n_blunders > 0.3:
         if not user.endgame_boost_until or user.endgame_boost_until < today():

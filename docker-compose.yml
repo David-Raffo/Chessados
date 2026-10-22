@@ -47,7 +47,7 @@ services:
     command: ["python", "-m", "app.import_puzzles"]
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD:-chess}@db:5432/${POSTGRES_DB:-chess}
-      PUZZLE_LIMIT: ${PUZZLE_LIMIT:-150000}
+      PUZZLE_LIMIT: ${PUZZLE_LIMIT:-1000000}
     volumes:
       - ./data:/data:ro
 

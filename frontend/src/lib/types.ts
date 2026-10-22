@@ -53,7 +53,9 @@ export interface Game {
   user_result: "win" | "loss" | "draw" | null;
   reviewed: boolean;
   user_notes: string | null;
-  analysis_status: "pending" | "running" | "done" | "error";
+  /** pending → running → quick (análisis rápido listo) → refining (afinando) → done */
+  analysis_status: "pending" | "running" | "quick" | "refining" | "done" | "error";
+  analysis_depth?: number | null;
   accuracy: number | null;
   played_at: string | null;
   analysis?: MoveAnalysis[];

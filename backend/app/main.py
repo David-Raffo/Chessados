@@ -22,6 +22,14 @@ def migrate(conn) -> None:
         conn.execute(text("UPDATE users SET username = left(lower(split_part(username, '@', 1)), 24) || '_' || id"))
         conn.execute(text("ALTER TABLE users ALTER COLUMN username TYPE VARCHAR(30)"))
         conn.execute(text("ALTER INDEX IF EXISTS ix_users_email RENAME TO ix_users_username"))
+    # Búsqueda de puzzles por tema: índice sobre la lista de temas (rápido aunque haya millones)
+    conn.execute(text(
+        "DO $$ BEGIN IF to_regclass('puzzles') IS NOT NULL THEN "
+        "CREATE INDEX IF NOT EXISTS ix_puzzles_themes ON puzzles USING gin (string_to_array(themes, ' ')); "
+        "END IF; END $$"
+    ))
+    # Análisis en dos pasadas: profundidad de la última pasada guardada
+    conn.execute(text("ALTER TABLE IF EXISTS games ADD COLUMN IF NOT EXISTS analysis_depth INTEGER"))
     if columns and "is_admin" not in columns:
         # Invitaciones: la cuenta más antigua pasa a ser la de administrador
         conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false"))

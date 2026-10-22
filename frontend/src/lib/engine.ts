@@ -1,9 +1,19 @@
 /**
  * Stockfish 17 (WASM, un hilo) en un Web Worker: juega con límite de ELO sin pasar por el servidor.
  */
+/** El motor se cerró (cambio de pantalla, reinicio…): no es un fallo que haya que mostrar. */
+export class EngineClosedError extends Error {
+  constructor() {
+    super("Motor cerrado");
+  }
+}
+
 export class Engine {
   private worker: Worker;
   private listeners = new Set<(line: string) => void>();
+  // Peticiones en curso: al cerrar el motor (o si falla) se rechazan para que nadie se quede esperando
+  private pending = new Set<(err: Error) => void>();
+  private closed = false;
   private queue: Promise<unknown> = Promise.resolve();
   readonly ready: Promise<void>;
 
@@ -13,7 +23,15 @@ export class Engine {
       const line = String(e.data);
       this.listeners.forEach((l) => l(line));
     };
+    this.worker.onerror = () => this.failAll(new Error("El motor ha fallado"));
     this.ready = this.request("uci", "uciok").then(() => this.isReady());
+    this.ready.catch(() => undefined); // el error lo recibe quien use el motor
+  }
+
+  private failAll(err: Error) {
+    this.pending.forEach((reject) => reject(err));
+    this.pending.clear();
+    this.listeners.clear();
   }
 
   private send(cmd: string) {
@@ -22,15 +40,21 @@ export class Engine {
 
   /** Envía un comando y espera la primera línea que empiece por `until`. */
   private request(cmd: string, until: string, onLine?: (line: string) => void): Promise<string> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      if (this.closed) {
+        reject(new EngineClosedError());
+        return;
+      }
       const listener = (line: string) => {
         onLine?.(line);
         if (line.startsWith(until)) {
           this.listeners.delete(listener);
+          this.pending.delete(reject);
           resolve(line);
         }
       };
       this.listeners.add(listener);
+      this.pending.add(reject);
       this.send(cmd);
     });
   }
@@ -94,8 +118,9 @@ export class Engine {
   }
 
   terminate() {
+    this.closed = true;
     this.worker.terminate();
-    this.listeners.clear();
+    this.failAll(new EngineClosedError());
   }
 }
 

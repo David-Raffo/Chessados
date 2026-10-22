@@ -13,11 +13,21 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .config import DEFAULT_SPLIT
 from .db import Base
+
+
+class AppSetting(Base):
+    """Ajustes internos de la instalación (p. ej. el secreto JWT generado si no hay uno en el .env)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
 
 
 class User(Base):
@@ -85,6 +95,7 @@ class Game(Base):
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     analysis_status: Mapped[str] = mapped_column(String(10), default="pending", index=True)
+    analysis_depth: Mapped[int | None] = mapped_column(Integer, nullable=True)
     accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     played_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -119,6 +130,10 @@ class GameAnalysis(Base):
 
 class Puzzle(Base):
     __tablename__ = "puzzles"
+    # Índice para buscar por tema (ver main.migrate; se crea también en instalaciones nuevas)
+    __table_args__ = (
+        Index("ix_puzzles_themes", text("string_to_array(themes, ' ')"), postgresql_using="gin"),
+    )
 
     id: Mapped[str] = mapped_column(String(10), primary_key=True)  # id de Lichess
     fen: Mapped[str] = mapped_column(String(100))

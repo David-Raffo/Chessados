@@ -19,7 +19,7 @@ export default function PlanBanner() {
 
   const refresh = useCallback(() => {
     if (getActiveStep() == null) return;
-    api<CoachPlan>("/coach/today").then((p) => setSteps(p.steps)).catch(() => undefined);
+    api<CoachPlan>("/coach/today?light=true").then((p) => setSteps(p.steps)).catch(() => undefined);
   }, []);
 
   useEffect(() => onActiveStepChange(() => setIndex(getActiveStep())), []);

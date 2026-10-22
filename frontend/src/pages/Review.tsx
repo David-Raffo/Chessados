@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Chess } from "chess.js";
 import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import Board, { uciToKeys, type Color, type DrawShape, type Key } from "../components/Board";
+import Board, { toDests, turnColor, uciToKeys, type Color, type DrawShape, type Key } from "../components/Board";
 import { api } from "../lib/api";
+import { Engine } from "../lib/engine";
+import { sound } from "../lib/sound";
 import { CLASS_LABEL, CLASS_SYMBOL, CLASS_TEXT, PHASE_LABEL, opponentName } from "../lib/labels";
 import type { Game, MoveAnalysis } from "../lib/types";
 import { useActivity } from "../lib/useActivity";
@@ -38,7 +40,35 @@ interface OpeningInfo {
   deviation: { ply: number; type: "you" | "opponent" | "end"; san: string | null; expected: string[] | null } | null;
 }
 
-const winChance =(cp: number) => 1 / (1 + Math.exp(-0.00368208 * cp));
+const winChance = (cp: number) => 1 / (1 + Math.exp(-0.00368208 * cp));
+
+const ANALYSING = ["pending", "running", "quick", "refining"];
+
+function cpText(cp: number): string {
+  if (Math.abs(cp) >= 9000) return `#${cp > 0 ? "" : "-"}${10000 - Math.abs(cp)}`;
+  return `${cp > 0 ? "+" : ""}${(cp / 100).toFixed(1)}`;
+}
+
+/** Posición tras aplicar una lista de jugadas UCI a un FEN. */
+function playFrom(fen: string, moves: string[]): Chess {
+  const c = new Chess(fen);
+  for (const m of moves) c.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] ?? "q" });
+  return c;
+}
+
+/** SAN de una línea UCI desde un FEN (se para en la primera jugada ilegal). */
+function sanLine(fen: string, moves: string[]): string[] {
+  const c = new Chess(fen);
+  const out: string[] = [];
+  for (const m of moves) {
+    try {
+      out.push(c.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] }).san);
+    } catch {
+      break;
+    }
+  }
+  return out;
+}
 
 export default function Review() {
   const { id } = useParams();
@@ -50,6 +80,11 @@ export default function Review() {
   const [revealed, setRevealed] = useState(false);
   const [orientation, setOrientation] = useState<Color>("white");
   const [opening, setOpening] = useState<OpeningInfo | null>(null);
+  // Variante explorada a mano desde la jugada `varBase` de la partida (vacía = línea de la partida)
+  const [varBase, setVarBase] = useState(0);
+  const [variation, setVariation] = useState<string[]>([]);
+  const [live, setLive] = useState<{ fen: string; cp: number; pv: string[] } | null>(null);
+  const engine = useRef<Engine | null>(null);
   useActivity("play", "review", id);
 
   const load = useCallback(() => {
@@ -72,22 +107,98 @@ export default function Review() {
     if (game) setOrientation(game.user_color);
   }, [game?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Mientras el worker analiza, se consulta cada 3 s
+  // Mientras el worker analiza (primero rápido, luego en profundidad) se consulta cada 2 s
   useEffect(() => {
-    if (!game || (game.analysis_status !== "pending" && game.analysis_status !== "running")) return;
-    const t = window.setTimeout(load, 3000);
+    if (!game || !ANALYSING.includes(game.analysis_status)) return;
+    const t = window.setTimeout(load, 2000);
     return () => window.clearTimeout(t);
   }, [game, load]);
 
   const positions = useMemo(() => (game ? parsePositions(game.pgn) : []), [game?.pgn]); // eslint-disable-line react-hooks/exhaustive-deps
   const analysis = game?.analysis ?? [];
-  const ready = game?.analysis_status === "done" && analysis.length > 0;
+  const ready = !!game && ["quick", "refining", "done"].includes(game.analysis_status) && analysis.length > 0;
   const showEngine = revealed && ready;
   const current = ply > 0 ? analysis[ply - 1] : undefined;
+  const inVariation = variation.length > 0;
+
+  // Posición que se ve en el tablero: la de la partida o la de la variante
+  const board = useMemo(() => {
+    const base = positions[Math.min(inVariation ? varBase : ply, positions.length - 1)];
+    if (!base) return null;
+    const c = inVariation ? playFrom(base.fen, variation) : new Chess(base.fen);
+    const last = inVariation ? uciToKeys(variation[variation.length - 1]) : base.lastMove;
+    return { chess: c, fen: c.fen(), lastMove: last as Key[] | undefined };
+  }, [positions, ply, varBase, variation, inVariation]);
+
+  const goTo = useCallback(
+    (p: number) => {
+      setVariation([]);
+      setPly(Math.max(0, Math.min(positions.length - 1, p)));
+    },
+    [positions.length],
+  );
+
+  // Stockfish en el navegador para las variantes: arranca al ver el análisis
+  useEffect(() => {
+    if (!revealed) return;
+    const eng = new Engine();
+    eng.setOptions([["UCI_LimitStrength", "false"], ["Skill Level", 20], ["Hash", 32]]).catch(() => undefined);
+    engine.current = eng;
+    return () => {
+      eng.terminate();
+      engine.current = null;
+    };
+  }, [revealed]);
+
+  // Evaluación en vivo de la posición de la variante (se ignoran resultados de posiciones ya dejadas atrás)
+  const latestFen = useRef("");
+  useEffect(() => {
+    if (!inVariation || !board || !engine.current) return;
+    const fen = board.fen;
+    latestFen.current = fen;
+    if (board.chess.isGameOver()) {
+      const cp = board.chess.isCheckmate() ? (board.chess.turn() === "w" ? -10000 : 10000) : 0;
+      setLive({ fen, cp, pv: [] });
+      return;
+    }
+    engine.current
+      .evaluate(fen, 16)
+      .then((r) => {
+        if (latestFen.current === fen) setLive({ fen, ...r });
+      })
+      .catch(() => undefined); // motor cerrado al salir de la revisión
+  }, [board, inVariation]);
+
+  function onBoardMove(from: Key, to: Key) {
+    if (!board) return;
+    const c = new Chess(board.fen);
+    let m;
+    try {
+      m = c.move({ from, to, promotion: "q" });
+    } catch {
+      return;
+    }
+    if (m.captured) sound.capture();
+    else sound.move();
+    const uci = `${from}${to}${m.promotion ?? ""}`;
+    // Si coincide con la jugada de la partida, se sigue la partida
+    const next = positions[ply + 1];
+    if (!inVariation && next?.lastMove && `${next.lastMove[0]}${next.lastMove[1]}` === uci.slice(0, 4) && !m.promotion) {
+      setPly(ply + 1);
+      return;
+    }
+    if (!inVariation) setVarBase(ply);
+    setVariation((v) => [...v, uci]);
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === "TEXTAREA") return;
+      if (inVariation) {
+        if (e.key === "ArrowLeft") setVariation((v) => v.slice(0, -1));
+        if (e.key === "Escape") setVariation([]);
+        return;
+      }
       if (e.key === "ArrowLeft") setPly((p) => Math.max(0, p - 1));
       if (e.key === "ArrowRight") setPly((p) => Math.min(positions.length - 1, p + 1));
       if (e.key === "ArrowUp") setPly(0);
@@ -95,14 +206,22 @@ export default function Review() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [positions.length]);
+  }, [positions.length, inVariation]);
+
+  const liveNow = inVariation && live && board && live.fen === board.fen ? live : null;
 
   const shapes = useMemo((): DrawShape[] => {
-    if (!showEngine || !current?.best_uci) return [];
-    if (current.classification === "best" || current.classification === "good") return [];
-    const [orig, dest] = uciToKeys(current.best_uci);
+    if (inVariation) {
+      if (!liveNow?.pv[0]) return [];
+      const [orig, dest] = uciToKeys(liveNow.pv[0]);
+      return [{ orig, dest, brush: "blue" }];
+    }
+    // La mejor jugada de la posición que se ve: es la que el análisis calculó para la jugada siguiente
+    const here = analysis[ply];
+    if (!showEngine || !here?.best_uci) return [];
+    const [orig, dest] = uciToKeys(here.best_uci);
     return [{ orig, dest, brush: "green" }];
-  }, [current, showEngine]);
+  }, [analysis, ply, showEngine, inVariation, liveNow]);
 
   const chartData = useMemo(
     () =>
@@ -130,16 +249,18 @@ export default function Review() {
   async function markReviewed() {
     if (!game) return;
     await api(`/games/${game.id}`, { method: "PATCH", body: { reviewed: true, user_notes: notes || game.user_notes } });
-    navigate("/partidas");
+    navigate("/jugar"); // revisada: a por la siguiente partida
   }
 
   if (error) return <p className="text-bad">{error}</p>;
   if (!game) return <p className="text-muted">Cargando partida…</p>;
 
-  const pos = positions[Math.min(ply, positions.length - 1)];
   const whiteName = game.user_color === "white" ? "Tú" : opponentName(game);
   const blackName = game.user_color === "black" ? "Tú" : opponentName(game);
-  const evalCp = showEngine ? (current ? current.eval_cp : analysis[0] ? 20 : 0) : 0;
+  const evalCp = liveNow ? liveNow.cp : showEngine ? (current ? current.eval_cp : analysis[0] ? 20 : 0) : 0;
+  const varSan = inVariation ? sanLine(positions[varBase].fen, variation) : [];
+  const liveLine = liveNow ? sanLine(liveNow.fen, liveNow.pv.slice(0, 8)) : [];
+  const startMove = Math.floor(varBase / 2) + 1;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -172,16 +293,27 @@ export default function Review() {
             </div>
           )}
           <div className="min-w-0 flex-1">
-            <Board fen={pos.fen} orientation={orientation} lastMove={pos.lastMove} shapes={shapes} />
+            {board && (
+              <Board
+                fen={board.fen}
+                orientation={orientation}
+                lastMove={board.lastMove}
+                shapes={shapes}
+                movable={revealed ? turnColor(board.chess) : undefined}
+                dests={toDests(board.chess)}
+                check={board.chess.inCheck()}
+                onMove={onBoardMove}
+              />
+            )}
           </div>
         </div>
 
         <div className="flex justify-center gap-2">
           {[
-            ["⏮", () => setPly(0)],
-            ["◀", () => setPly(Math.max(0, ply - 1))],
-            ["▶", () => setPly(Math.min(positions.length - 1, ply + 1))],
-            ["⏭", () => setPly(positions.length - 1)],
+            ["⏮", () => goTo(0)],
+            ["◀", () => (inVariation ? setVariation((v) => v.slice(0, -1)) : goTo(ply - 1))],
+            ["▶", () => !inVariation && goTo(ply + 1)],
+            ["⏭", () => goTo(positions.length - 1)],
           ].map(([label, fn]) => (
             <button key={label as string} className="btn-ghost w-14" onClick={fn as () => void}>
               {label as string}
@@ -195,7 +327,7 @@ export default function Review() {
               <AreaChart
                 data={chartData}
                 margin={{ left: -28, right: 4, top: 4, bottom: 0 }}
-                onClick={(e) => e?.activeLabel != null && setPly(Number(e.activeLabel))}
+                onClick={(e) => e?.activeLabel != null && goTo(Number(e.activeLabel))}
               >
                 <defs>
                   <linearGradient id="evalFill" x1="0" y1="0" x2="0" y2="1">
@@ -242,7 +374,46 @@ export default function Review() {
           <div className="card space-y-3">
             <h2 className="font-bold">2 · Lo que dice el motor</h2>
             {(game.analysis_status === "pending" || game.analysis_status === "running") && (
-              <p className="animate-pulse text-sm text-muted">Stockfish está analizando la partida… suele tardar uno o dos minutos.</p>
+              <p className="animate-pulse text-sm text-muted">Stockfish está analizando la partida… un momento.</p>
+            )}
+            {(game.analysis_status === "quick" || game.analysis_status === "refining") && (
+              <p className="text-xs text-muted">
+                <span className="animate-pulse">●</span> Análisis rápido listo; Stockfish lo está afinando en profundidad.
+              </p>
+            )}
+            {inVariation && (
+              <div className="space-y-2 rounded-xl border border-play/40 bg-play/10 p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-play">Explorando una variante</span>
+                  <span className="font-mono font-bold">{liveNow ? cpText(liveNow.cp) : "…"}</span>
+                </div>
+                <p className="font-medium">
+                  {varSan.map((san, i) => {
+                    const plyNo = varBase + i + 1;
+                    const num = plyNo % 2 ? `${Math.ceil(plyNo / 2)}. ` : i === 0 ? `${startMove}… ` : "";
+                    return (
+                      <span key={i}>
+                        {num}
+                        {san}{" "}
+                      </span>
+                    );
+                  })}
+                </p>
+                {liveLine.length > 0 && (
+                  <p className="text-muted">
+                    Mejor: <b className="text-fg">{liveLine[0]}</b> · {liveLine.slice(1).join(" ")}
+                  </p>
+                )}
+                {!liveNow && <p className="animate-pulse text-xs text-muted">Stockfish pensando…</p>}
+                <div className="flex gap-2">
+                  <button className="btn-ghost flex-1 py-1.5" onClick={() => setVariation((v) => v.slice(0, -1))}>
+                    ◀ Deshacer
+                  </button>
+                  <button className="btn-primary flex-1 py-1.5" onClick={() => setVariation([])}>
+                    Volver a la partida
+                  </button>
+                </div>
+              </div>
             )}
             {game.analysis_status === "error" && (
               <div className="text-sm text-bad">
@@ -272,7 +443,7 @@ export default function Review() {
                     <div className="text-xs text-muted">Graves</div>
                   </div>
                 </div>
-                {current ? (
+                {inVariation ? null : current ? (
                   <div className="rounded-xl bg-panel2 p-3 text-sm">
                     <div className="flex justify-between">
                       <span className={`font-bold ${CLASS_TEXT[current.classification]}`}>
@@ -286,6 +457,16 @@ export default function Review() {
                       <p className="mt-1">
                         Mejor era <b className="text-good">{current.best_san}</b>
                         {current.pv_san && <span className="text-muted"> · {current.pv_san}</span>}
+                        <button
+                          className="ml-1 text-play underline"
+                          onClick={() => {
+                            // Vuelve a la posición de antes de tu jugada y juega la buena como variante
+                            setVarBase(current.ply - 1);
+                            setVariation([current.best_uci!]);
+                          }}
+                        >
+                          Verla en el tablero
+                        </button>
                       </p>
                     )}
                     <p className="mt-1 text-xs text-muted">
@@ -294,7 +475,10 @@ export default function Review() {
                     </p>
                   </div>
                 ) : (
-                  <p className="text-sm text-muted">Usa ← → o pulsa una jugada. La flecha verde marca la mejor alternativa.</p>
+                  <p className="text-sm text-muted">
+                    Usa ← → o pulsa una jugada. La flecha verde marca la mejor jugada en la posición que ves. Mueve las piezas para
+                    probar otros caminos: Stockfish los evalúa al momento.
+                  </p>
                 )}
               </>
             )}
@@ -325,7 +509,7 @@ export default function Review() {
           </div>
         )}
 
-        <MoveTable positions={positions} analysis={showEngine ? analysis : []} ply={ply} onPick={setPly} />
+        <MoveTable positions={positions} analysis={showEngine ? analysis : []} ply={inVariation ? -1 : ply} onPick={goTo} />
         <Link to="/partidas" className="block text-center text-sm text-muted underline">
           Todas las partidas
         </Link>

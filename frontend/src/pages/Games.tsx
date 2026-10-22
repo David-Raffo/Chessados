@@ -25,7 +25,7 @@ export default function Games() {
 
   // Refresca mientras haya partidas en la cola de análisis
   useEffect(() => {
-    if (!games?.some((g) => g.analysis_status === "pending" || g.analysis_status === "running")) return;
+    if (!games?.some((g) => ["pending", "running", "quick", "refining"].includes(g.analysis_status))) return;
     const t = window.setTimeout(load, 5000);
     return () => window.clearTimeout(t);
   }, [games, load]);
@@ -133,7 +133,7 @@ export default function Games() {
                   </div>
                 </div>
                 <div className="text-right text-xs">
-                  {g.analysis_status === "done" ? (
+                  {["quick", "refining", "done"].includes(g.analysis_status) ? (
                     g.accuracy != null && <div className="font-bold">{g.accuracy}%</div>
                   ) : g.analysis_status === "error" ? (
                     <div className="text-bad">Error</div>

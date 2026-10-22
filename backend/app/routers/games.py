@@ -42,6 +42,7 @@ def game_out(g: Game, with_analysis: bool = False) -> dict:
         "reviewed": g.reviewed,
         "user_notes": g.user_notes,
         "analysis_status": g.analysis_status,
+        "analysis_depth": g.analysis_depth,
         "accuracy": g.accuracy,
         "played_at": g.played_at.isoformat() if g.played_at else None,
     }
@@ -162,9 +163,14 @@ def _parse_date(headers: chess.pgn.Headers) -> datetime | None:
         return None
 
 
-def import_pgn_text(db: Session, user: User, text: str, source: str, username: str | None) -> dict:
+def import_pgn_text(
+    db: Session, user: User, text: str, source: str, names: list[str | None], color: str | None = None
+) -> dict:
+    """Importa partidas. Tu color se deduce de tu nombre en el PGN (cualquiera de `names`); si no aparece
+    se usa `color` y, si tampoco se indicó, la partida se omite para no analizar las jugadas de tu rival."""
     stream = io.StringIO(text)
-    imported = skipped = 0
+    imported = skipped = unknown_color = 0
+    mine = {n.strip().lower() for n in names if n and n.strip()}
     existing = set(db.scalars(select(Game.external_id).where(Game.user_id == user.id, Game.external_id.isnot(None))))
     while True:
         game = chess.pgn.read_game(stream)
@@ -176,17 +182,24 @@ def import_pgn_text(db: Session, user: User, text: str, source: str, username: s
         if len(moves) < 6 or (ext and ext in existing):
             skipped += 1
             continue
-        color = "white"
-        if username and h.get("Black", "").lower() == username.lower():
-            color = "black"
-        opp_name = h.get("Black" if color == "white" else "White", "?")
-        opp_elo = h.get("BlackElo" if color == "white" else "WhiteElo", "")
+        white, black = h.get("White", "").strip().lower(), h.get("Black", "").strip().lower()
+        if white in mine and black not in mine:
+            game_color = "white"
+        elif black in mine and white not in mine:
+            game_color = "black"
+        elif color in ("white", "black"):
+            game_color = color
+        else:
+            unknown_color += 1
+            continue
+        opp_name = h.get("Black" if game_color == "white" else "White", "?")
+        opp_elo = h.get("BlackElo" if game_color == "white" else "WhiteElo", "")
         result = h.get("Result", "*")
         exporter = chess.pgn.StringExporter(headers=True, variations=False, comments=False)
         g = Game(
             user_id=user.id, pgn=game.accept(exporter), source=source, opponent=opp_name[:80],
             opponent_elo=int(opp_elo) if opp_elo.isdigit() else None, time_control=h.get("TimeControl"),
-            user_color=color, result=result, user_result=user_result(result, color),
+            user_color=game_color, result=result, user_result=user_result(result, game_color),
             analysis_status="pending", external_id=ext,
         )
         if (played := _parse_date(h)) is not None:
@@ -196,12 +209,14 @@ def import_pgn_text(db: Session, user: User, text: str, source: str, username: s
             existing.add(ext)
         imported += 1
     db.commit()
-    return {"imported": imported, "skipped": skipped}
+    return {"imported": imported, "skipped": skipped, "unknown_color": unknown_color}
 
 
 class PgnIn(BaseModel):
     pgn: str = Field(max_length=2_000_000)
-    username: str | None = None
+    username: str | None = Field(default=None, max_length=60)
+    # Color con el que jugaste si tu nombre no aparece en el PGN
+    color: str | None = Field(default=None, pattern="^(white|black)$")
 
 
 class ExternalIn(BaseModel):
@@ -211,7 +226,8 @@ class ExternalIn(BaseModel):
 
 @router.post("/import/pgn")
 def import_pgn(body: PgnIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return import_pgn_text(db, user, body.pgn, "pgn", body.username or user.lichess_username)
+    names = [body.username, user.lichess_username, user.chesscom_username, user.username, user.name]
+    return import_pgn_text(db, user, body.pgn, "pgn", names, body.color)
 
 
 @router.post("/import/lichess")
@@ -225,8 +241,11 @@ def import_lichess(body: ExternalIn, user: User = Depends(current_user), db: Ses
         raise HTTPException(502, f"No se pudo conectar con Lichess: {e}")
     if r.status_code == 404:
         raise HTTPException(404, "Usuario de Lichess no encontrado")
-    r.raise_for_status()
-    return import_pgn_text(db, user, r.text, "lichess", body.username)
+    if r.status_code == 429:
+        raise HTTPException(429, "Lichess pide esperar un poco antes de volver a importar. Prueba en un minuto.")
+    if r.status_code != 200:
+        raise HTTPException(502, f"Lichess respondió con un error ({r.status_code}). Prueba más tarde.")
+    return import_pgn_text(db, user, r.text, "lichess", [body.username])
 
 
 @router.post("/import/chesscom")
@@ -238,6 +257,8 @@ def import_chesscom(body: ExternalIn, user: User = Depends(current_user), db: Se
             r = client.get(base)
             if r.status_code == 404:
                 raise HTTPException(404, "Usuario de Chess.com no encontrado")
+            if r.status_code == 429:
+                raise HTTPException(429, "Chess.com pide esperar un poco antes de volver a importar. Prueba en un minuto.")
             r.raise_for_status()
             pgns: list[str] = []
             for archive in reversed(r.json().get("archives", [])):
@@ -252,4 +273,4 @@ def import_chesscom(body: ExternalIn, user: User = Depends(current_user), db: Se
                     break
     except httpx.HTTPError as e:
         raise HTTPException(502, f"No se pudo conectar con Chess.com: {e}")
-    return import_pgn_text(db, user, "\n\n".join(pgns), "chesscom", body.username)
+    return import_pgn_text(db, user, "\n\n".join(pgns), "chesscom", [body.username])

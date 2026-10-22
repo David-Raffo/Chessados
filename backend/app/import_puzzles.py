@@ -51,9 +51,13 @@ def to_row(r: dict) -> dict | None:
     }
 
 
-def flush(batch: list[dict]) -> None:
+def flush(batch: list[dict]) -> int:
+    """Inserta un lote y devuelve cuántos puzzles eran nuevos (los repetidos se ignoran)."""
     with engine.begin() as conn:
-        conn.execute(insert(Puzzle).values(batch).on_conflict_do_nothing(index_elements=["id"]))
+        # RETURNING con ON CONFLICT DO NOTHING devuelve solo las filas insertadas
+        # (rowcount no sirve: el controlador devuelve -1 en inserciones de varias filas)
+        stmt = insert(Puzzle).values(batch).on_conflict_do_nothing(index_elements=["id"]).returning(Puzzle.id)
+        return len(conn.execute(stmt).fetchall())
 
 
 def run(reader: csv.DictReader, already: int) -> int:
@@ -64,15 +68,13 @@ def run(reader: csv.DictReader, already: int) -> int:
             continue
         batch.append(row)
         if len(batch) >= BATCH:
-            flush(batch)
-            total += len(batch)
+            total += flush(batch)
             batch = []
-            log.info("%d puzzles importados", total)
+            log.info("%d puzzles en la base de datos", total)
             if PUZZLE_LIMIT and total >= PUZZLE_LIMIT:
                 return total
     if batch:
-        flush(batch)
-        total += len(batch)
+        total += flush(batch)
     return total
 
 

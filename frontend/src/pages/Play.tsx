@@ -7,7 +7,8 @@ import { Captured, material, type MaterialInfo } from "../components/Material";
 import Promotion from "../components/Promotion";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { Engine, strengthFor } from "../lib/engine";
+import { Engine, EngineClosedError, strengthFor } from "../lib/engine";
+import { clearOngoing, loadOngoing, saveOngoing, type OngoingGame } from "../lib/ongoing";
 import { formatClock } from "../lib/labels";
 import { sound } from "../lib/sound";
 import { useActivity } from "../lib/useActivity";
@@ -43,6 +44,39 @@ interface SaveResult {
   ladder_after: number;
 }
 
+/** ¿Le falta material a `side` para poder dar mate? (rey solo, o rey y una pieza menor) */
+function cannotMate(c: Chess, side: Color): boolean {
+  const mine = c.board().flat().filter((p) => p && p.color === (side === "white" ? "w" : "b") && p.type !== "k");
+  return mine.length === 0 || (mine.length === 1 && (mine[0]!.type === "n" || mine[0]!.type === "b"));
+}
+
+/** PGN de la partida con sus cabeceras. */
+function pgnFor(c: Chess, color: Color, rivalName: string, setup: Setup, outcome: Outcome): string {
+  const date = new Date();
+  c.setHeader("Event", `Chessados · ${setup.tc.label}`);
+  c.setHeader("Site", "Chessados");
+  c.setHeader("Date", `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`);
+  c.setHeader("White", color === "white" ? "Tú" : rivalName);
+  c.setHeader("Black", color === "black" ? "Tú" : rivalName);
+  c.setHeader("Result", outcome.result);
+  c.setHeader("TimeControl", `${setup.tc.minutes * 60}+${setup.tc.inc}`);
+  c.setHeader("Termination", outcome.reason);
+  return c.pgn();
+}
+
+function chessFromMoves(moves: string[]): Chess {
+  const c = new Chess();
+  for (const m of moves) c.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
+  return c;
+}
+
+/** ¿Ha hecho ya el usuario alguna jugada? Antes de eso la partida se puede anular sin coste. */
+function userHasMoved(c: Chess, color: Color): boolean {
+  return c.history().length >= (color === "white" ? 1 : 2);
+}
+
+const rivalNameOf = (setup: Setup, elo: number) => `${setup.rival === "maia" ? "Maia" : "Stockfish"} ${elo}`;
+
 export default function Play() {
   const { user, setUser } = useAuth();
   const [params] = useSearchParams();
@@ -56,7 +90,9 @@ export default function Play() {
     color: "random",
     tc: TIME_CONTROLS.find((t) => t.id === params.get("tc")) ?? TIME_CONTROLS[0],
   });
-  const [game, setGame] = useState<{ color: Color; elo: number; setup: Setup; key: number } | null>(null);
+  const [game, setGame] = useState<{ color: Color; elo: number; setup: Setup; key: number; resume?: OngoingGame } | null>(null);
+  const [ongoing, setOngoing] = useState<OngoingGame | null>(loadOngoing);
+  const [abandoning, setAbandoning] = useState(false);
 
   useEffect(() => {
     api("/games/can-play").then(setLock).catch(() => setLock({ locked: false, game_id: null, ladder_elo: 1200 }));
@@ -65,6 +101,35 @@ export default function Play() {
   useEffect(() => {
     api<{ available: boolean }>("/maia/status").then((r) => setMaia(r.available)).catch(() => undefined);
   }, []);
+
+  /** Abandonar la partida a medias: si ya habías jugado, cuenta como derrota. */
+  async function abandonOngoing() {
+    if (!ongoing) return;
+    const c = chessFromMoves(ongoing.moves);
+    if (userHasMoved(c, ongoing.color)) {
+      setAbandoning(true);
+      const outcome: Outcome = { result: ongoing.color === "white" ? "0-1" : "1-0", reason: "Abandono" };
+      try {
+        const r = await api<SaveResult>("/games", {
+          body: {
+            pgn: pgnFor(c, ongoing.color, rivalNameOf(ongoing.setup, ongoing.elo), ongoing.setup, outcome),
+            user_color: ongoing.color,
+            result: outcome.result,
+            opponent: ongoing.setup.rival,
+            opponent_elo: ongoing.elo,
+            time_control: ongoing.setup.tc.id,
+            ladder: ongoing.setup.ladder,
+          },
+        });
+        if (user) setUser({ ...user, ladder_elo: r.ladder_after });
+      } finally {
+        setAbandoning(false);
+      }
+    }
+    clearOngoing();
+    setOngoing(null);
+    api("/games/can-play").then(setLock).catch(() => undefined);
+  }
 
   function start() {
     const color: Color = setup.color === "random" ? (Math.random() < 0.5 ? "white" : "black") : setup.color;
@@ -80,7 +145,11 @@ export default function Play() {
         color={game.color}
         elo={game.elo}
         setup={game.setup}
-        onExit={() => setGame(null)}
+        resume={game.resume}
+        onExit={() => {
+          setOngoing(loadOngoing());
+          setGame(null);
+        }}
         onSaved={(r) => user && setUser({ ...user, ladder_elo: r.ladder_after })}
       />
     );
@@ -92,6 +161,33 @@ export default function Play() {
         <h1 className="text-2xl font-extrabold">Jugar contra la máquina</h1>
         <p className="text-muted">Stockfish con fuerza ajustable. Juega lento y revisa cada partida.</p>
       </header>
+
+      {ongoing && (
+        <div className="card space-y-3 border-play/50 bg-play/10">
+          <div>
+            <p className="font-semibold">
+              Tienes una partida a medias contra {rivalNameOf(ongoing.setup, ongoing.elo)} ({ongoing.setup.tc.label})
+            </p>
+            <p className="text-sm text-muted">
+              Termínala o abandónala antes de empezar otra. Abandonar cuenta como derrota
+              {ongoing.setup.ladder ? " y resta puntos en la escalera" : ""}.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="btn-primary flex-1"
+              onClick={() =>
+                setGame({ color: ongoing.color, elo: ongoing.elo, setup: ongoing.setup as Setup, key: Date.now(), resume: ongoing })
+              }
+            >
+              Continuar
+            </button>
+            <button className="btn-ghost flex-1 text-bad" disabled={abandoning} onClick={abandonOngoing}>
+              Abandonarla
+            </button>
+          </div>
+        </div>
+      )}
 
       {lock?.locked && (
         <div className="card border-tactics/50 bg-tactics/10">
@@ -221,7 +317,7 @@ export default function Play() {
           </div>
         </div>
 
-        <button className="btn-primary w-full py-3 text-lg" disabled={!lock || lock.locked} onClick={start}>
+        <button className="btn-primary w-full py-3 text-lg" disabled={!lock || lock.locked || !!ongoing} onClick={start}>
           Empezar partida
         </button>
       </section>
@@ -235,18 +331,24 @@ function GameView({
   setup,
   onExit,
   onSaved,
+  resume,
 }: {
   color: Color;
   elo: number;
   setup: Setup;
   onExit: () => void;
   onSaved: (r: SaveResult) => void;
+  resume?: OngoingGame;
 }) {
   const navigate = useNavigate();
-  const chess = useRef(new Chess());
+  const chess = useRef(resume ? chessFromMoves(resume.moves) : new Chess());
   const engine = useRef<Engine | null>(null);
   const [fen, setFen] = useState(chess.current.fen());
-  const [lastMove, setLastMove] = useState<Key[] | undefined>();
+  const [lastMove, setLastMove] = useState<Key[] | undefined>(() => {
+    const h = chess.current.history({ verbose: true });
+    const m = h[h.length - 1];
+    return m ? [m.from as Key, m.to as Key] : undefined;
+  });
   const [orientation, setOrientation] = useState<Color>(color);
   const [promo, setPromo] = useState<{ from: Key; to: Key } | null>(null);
   const [thinking, setThinking] = useState(false);
@@ -254,21 +356,47 @@ function GameView({
   const [saved, setSaved] = useState<SaveResult | null>(null);
   const [saveError, setSaveError] = useState("");
   const [engineError, setEngineError] = useState("");
-  const clocks = useRef({ white: setup.tc.minutes * 60_000, black: setup.tc.minutes * 60_000 });
+  const clocks = useRef(resume ? { ...resume.clocks } : { white: setup.tc.minutes * 60_000, black: setup.tc.minutes * 60_000 });
   const [clockView, setClockView] = useState(clocks.current);
   const lastTick = useRef<number | null>(null);
   const over = useRef(false);
   const ping = useActivity(outcome ? null : "play", "game");
   const strength = useMemo(() => strengthFor(elo), [elo]);
   const isMaia = setup.rival === "maia";
-  const rivalName = `${isMaia ? "Maia" : "Stockfish"} ${elo}`;
+  const rivalName = rivalNameOf(setup, elo);
+
+  /** Guarda la partida en curso en el navegador (para continuarla si recargas o sales). */
+  const persist = useCallback(() => {
+    if (over.current) return;
+    saveOngoing({
+      color,
+      elo,
+      setup,
+      moves: chess.current.history({ verbose: true }).map((m) => m.from + m.to + (m.promotion ?? "")),
+      clocks: { ...clocks.current },
+      savedAt: Date.now(),
+    });
+  }, [color, elo, setup]);
 
   const finish = useCallback((o: Outcome) => {
     if (over.current) return;
     over.current = true;
+    clearOngoing();
     setOutcome(o);
     sound.end();
   }, []);
+
+  // Al cerrar o recargar la pestaña a mitad de partida, el navegador pide confirmación
+  useEffect(() => {
+    const onUnload = (e: BeforeUnloadEvent) => {
+      if (over.current) return;
+      persist();
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, [persist]);
 
   const checkEnd = useCallback(() => {
     const c = chess.current;
@@ -291,9 +419,11 @@ function GameView({
       if (chess.current.inCheck()) sound.check();
       else if (captured) sound.capture();
       else sound.move();
-      return checkEnd();
+      const ended = checkEnd();
+      if (!ended) persist();
+      return ended;
     },
-    [checkEnd, setup.tc.inc],
+    [checkEnd, persist, setup.tc.inc],
   );
 
   const engineMove = useCallback(async () => {
@@ -319,7 +449,7 @@ function GameView({
       afterMove(engineColor, !!move.captured);
       ping();
     } catch (e) {
-      setEngineError(`El motor ha fallado: ${(e as Error).message}`);
+      if (!(e instanceof EngineClosedError)) setEngineError(`El motor ha fallado: ${(e as Error).message}`);
     } finally {
       setThinking(false);
     }
@@ -327,9 +457,10 @@ function GameView({
 
   // Arranque del motor
   useEffect(() => {
+    const rivalToMove = () => turnColor(chess.current) !== color && !chess.current.isGameOver();
     if (isMaia) {
       lastTick.current = performance.now();
-      if (color === "black") engineMove();
+      if (rivalToMove()) engineMove();
       return;
     }
     const eng = new Engine();
@@ -339,9 +470,11 @@ function GameView({
       .then(() => eng.newGame())
       .then(() => {
         lastTick.current = performance.now();
-        if (color === "black") engineMove();
+        if (rivalToMove()) engineMove();
       })
-      .catch((e) => setEngineError(String(e)));
+      .catch((e) => {
+        if (!(e instanceof EngineClosedError)) setEngineError(String(e));
+      });
     return () => {
       eng.terminate();
       engine.current = null;
@@ -359,29 +492,29 @@ function GameView({
       lastTick.current = now;
       if (clocks.current[side] <= 0) {
         clocks.current[side] = 0;
-        finish({ result: side === "white" ? "0-1" : "1-0", reason: "Tiempo agotado" });
+        const other: Color = side === "white" ? "black" : "white";
+        if (cannotMate(chess.current, other)) {
+          finish({ result: "1/2-1/2", reason: "Tiempo agotado, pero el rival no tiene material para dar mate" });
+        } else {
+          finish({ result: side === "white" ? "0-1" : "1-0", reason: "Tiempo agotado" });
+        }
       }
       setClockView({ ...clocks.current });
     }, 100);
-    return () => window.clearInterval(id);
-  }, [finish]);
+    // Los relojes también se guardan cada pocos segundos
+    const saver = window.setInterval(persist, 3000);
+    return () => {
+      window.clearInterval(id);
+      window.clearInterval(saver);
+    };
+  }, [finish, persist]);
 
   // Guardar la partida al terminar
   useEffect(() => {
     if (!outcome) return;
-    const c = chess.current;
-    const date = new Date();
-    c.setHeader("Event", `Chessados · ${setup.tc.label}`);
-    c.setHeader("Site", "Chessados");
-    c.setHeader("Date", `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`);
-    c.setHeader("White", color === "white" ? "Tú" : rivalName);
-    c.setHeader("Black", color === "black" ? "Tú" : rivalName);
-    c.setHeader("Result", outcome.result);
-    c.setHeader("TimeControl", `${setup.tc.minutes * 60}+${setup.tc.inc}`);
-    c.setHeader("Termination", outcome.reason);
     api<SaveResult>("/games", {
       body: {
-        pgn: c.pgn(),
+        pgn: pgnFor(chess.current, color, rivalName, setup, outcome),
         user_color: color,
         result: outcome.result,
         opponent: setup.rival,
@@ -522,12 +655,26 @@ function GameView({
               <button className="btn-ghost flex-1" onClick={() => setOrientation(orientation === "white" ? "black" : "white")}>
                 Girar
               </button>
-              <button
-                className="btn-ghost flex-1 text-bad"
-                onClick={() => finish({ result: color === "white" ? "0-1" : "1-0", reason: "Abandono" })}
-              >
-                Abandonar
-              </button>
+              {userHasMoved(chess.current, color) ? (
+                <button
+                  className="btn-ghost flex-1 text-bad"
+                  onClick={() => finish({ result: color === "white" ? "0-1" : "1-0", reason: "Abandono" })}
+                >
+                  Abandonar
+                </button>
+              ) : (
+                // Antes de tu primera jugada se puede anular sin coste: no se guarda ni cuenta para el ELO
+                <button
+                  className="btn-ghost flex-1"
+                  onClick={() => {
+                    over.current = true;
+                    clearOngoing();
+                    onExit();
+                  }}
+                >
+                  Anular
+                </button>
+              )}
             </div>
           </div>
         )}

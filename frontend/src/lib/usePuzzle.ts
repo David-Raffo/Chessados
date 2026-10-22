@@ -22,6 +22,16 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
   const [promo, setPromo] = useState<{ from: Key; to: Key } | null>(null);
   const startedAt = useRef(0);
   const reported = useRef(false);
+  // Temporizadores pendientes (respuesta del rival, solución animada…): se cancelan al cambiar de puzzle
+  // o reintentar, para que no se apliquen jugadas del puzzle anterior al nuevo
+  const timers = useRef<number[]>([]);
+  const later = useCallback((fn: () => void, ms: number) => {
+    timers.current.push(window.setTimeout(fn, ms));
+  }, []);
+  const cancelTimers = useCallback(() => {
+    timers.current.forEach((t) => window.clearTimeout(t));
+    timers.current = [];
+  }, []);
   const onDone = useRef(opts.onDone);
   onDone.current = opts.onDone;
 
@@ -48,6 +58,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
 
   useEffect(() => {
     if (!puzzle) return;
+    cancelTimers();
     chess.current = new Chess(puzzle.fen);
     setFen(puzzle.fen);
     setLastMove(undefined);
@@ -57,22 +68,22 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     setRecovered(false);
     setFlash(null);
     reported.current = false;
-    const t = window.setTimeout(() => {
+    later(() => {
       apply(puzzle.moves[0]);
       setIdx(1);
       setStatus("play");
       startedAt.current = performance.now();
     }, 500);
-    return () => window.clearTimeout(t);
-  }, [puzzle, apply]);
+    return cancelTimers;
+  }, [puzzle, apply, later, cancelTimers]);
 
   const fail = useCallback(() => {
     setMistake(true);
     setFlash("bad");
     sound.bad();
     report(false);
-    window.setTimeout(() => setFlash(null), 400);
-  }, [report]);
+    later(() => setFlash(null), 400);
+  }, [later, report]);
 
   const userMove = useCallback(
     (from: Key, to: Key, promotion?: string) => {
@@ -113,7 +124,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
         return;
       }
       setIdx(next + 1);
-      window.setTimeout(() => {
+      later(() => {
         apply(puzzle.moves[next]);
         if (next + 1 >= puzzle.moves.length) {
           setStatus(mistake ? "failed" : "solved");
@@ -121,7 +132,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
         }
       }, 300);
     },
-    [apply, fail, idx, mistake, puzzle, report, status],
+    [apply, fail, idx, later, mistake, puzzle, report, status],
   );
 
   /** Muestra la solución jugada a jugada (cuenta como fallo). */
@@ -131,13 +142,14 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     report(false);
     setStatus("failed");
     const remaining = puzzle.moves.slice(idx);
-    remaining.forEach((uci, i) => window.setTimeout(() => apply(uci), 450 * (i + 1)));
+    remaining.forEach((uci, i) => later(() => apply(uci), 450 * (i + 1)));
     setIdx(puzzle.moves.length);
-  }, [apply, idx, puzzle, report, status]);
+  }, [apply, idx, later, puzzle, report, status]);
 
   /** Vuelve a la posición inicial del puzzle para intentarlo de nuevo (ya cuenta como fallado). */
   const retry = useCallback(() => {
     if (!puzzle) return;
+    cancelTimers();
     chess.current = new Chess(puzzle.fen);
     apply(puzzle.moves[0]);
     setIdx(1);
@@ -145,7 +157,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     setRecovered(false);
     setFlash(null);
     setStatus("play");
-  }, [apply, puzzle]);
+  }, [apply, cancelTimers, puzzle]);
 
   const hint = useMemo((): Key | null => {
     if (!puzzle || status !== "play" || idx >= puzzle.moves.length) return null;

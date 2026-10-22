@@ -3,7 +3,8 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import exists, func, select
+from sqlalchemy import ARRAY, Text, cast, exists, func, literal_column, select
+from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.orm import Session
 
 from ..auth import current_user
@@ -28,7 +29,10 @@ def puzzle_out(p: Puzzle) -> dict:
 
 
 def _theme_filter(theme: str):
-    return (" " + Puzzle.themes + " ").like(f"% {theme} %")
+    # Usa el índice GIN ix_puzzles_themes (lista de temas del puzzle). El separador va como constante en
+    # el SQL para que la expresión coincida con la del índice.
+    themes = func.string_to_array(Puzzle.themes, literal_column("' '"))
+    return themes.op("@>")(cast(array([theme]), ARRAY(Text)))
 
 
 @router.get("/count")

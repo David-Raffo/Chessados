@@ -91,9 +91,11 @@ def _progress(db: Session, user: User, step: dict, plan: DailyPlan) -> tuple[flo
     return 0.0, "", {}
 
 
-def plan_for_today(db: Session, user: User) -> dict:
-    coach = today_plan(db, user)  # consejos siempre al día
+def plan_for_today(db: Session, user: User, light: bool = False) -> dict:
+    """`light`: solo los pasos y su progreso (para la barra de entrenamiento, que lo pide a menudo);
+    sin recalcular consejos ni sugerencias, que son lo costoso."""
     plan = db.scalars(select(DailyPlan).where(DailyPlan.user_id == user.id, DailyPlan.day == today())).first()
+    coach = {} if light and plan is not None else today_plan(db, user)  # consejos siempre al día
     if plan is None:
         plan = DailyPlan(user_id=user.id, day=today(), steps=coach["steps"])
         db.add(plan)
@@ -115,7 +117,7 @@ def plan_for_today(db: Session, user: User) -> dict:
                 out["game_id"] = latest.id
         steps.append(out)
     return {**coach, "steps": steps, "minutes": sum(s["minutes"] for s in plan.steps),
-            "extras": suggestions(db, user)}
+            "extras": [] if light else suggestions(db, user)}
 
 
 def _due(db: Session, user: User, kind: str) -> list[str]:

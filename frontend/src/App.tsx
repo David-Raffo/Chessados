@@ -17,8 +17,19 @@ import Rush from "./pages/Rush";
 import Settings from "./pages/Settings";
 
 export default function App() {
-  const { user, loading } = useAuth();
+  const { user, loading, offline, retry } = useAuth();
   if (loading) return <div className="flex h-screen items-center justify-center text-muted">Cargando…</div>;
+  if (offline) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 p-4 text-center">
+        <p className="font-semibold">No se puede conectar con el servidor.</p>
+        <p className="text-sm text-muted">Tu sesión sigue abierta; vuelve a intentarlo en un momento.</p>
+        <button className="btn-primary" onClick={retry}>
+          Reintentar
+        </button>
+      </div>
+    );
+  }
   if (!user) {
     return (
       <Routes>

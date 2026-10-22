@@ -8,7 +8,15 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from ..auth import create_token, current_user, hash_password, verify_password
+from ..auth import (
+    check_login_allowed,
+    clear_login_failures,
+    create_token,
+    current_user,
+    hash_password,
+    register_login_failure,
+    verify_password,
+)
 from ..config import DEFAULT_SPLIT, TIME_AREAS
 from ..db import get_db
 from ..models import Invite, User
@@ -42,8 +50,8 @@ class RegisterIn(BaseModel):
     @field_validator("password")
     @classmethod
     def valid_password(cls, v: str) -> str:
-        if len(v) < 4:
-            raise ValueError("La contraseña debe tener al menos 4 caracteres")
+        if len(v) < 6:
+            raise ValueError("La contraseña debe tener al menos 6 caracteres")
         return v
 
 
@@ -58,8 +66,8 @@ class SettingsIn(BaseModel):
     target_split: dict[str, float] | None = None
     review_lock: bool | None = None
     ladder_elo: int | None = Field(default=None, ge=400, le=3000)
-    lichess_username: str | None = None
-    chesscom_username: str | None = None
+    lichess_username: str | None = Field(default=None, max_length=60)
+    chesscom_username: str | None = Field(default=None, max_length=60)
 
 
 def user_out(u: User) -> dict:
@@ -137,9 +145,13 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
 
 @router.post("/auth/login")
 def login(body: LoginIn, db: Session = Depends(get_db)):
-    user = db.scalars(select(User).where(User.username == body.username.strip().lower())).first()
+    username = body.username.strip().lower()
+    check_login_allowed(username)
+    user = db.scalars(select(User).where(User.username == username)).first()
     if not user or not verify_password(body.password, user.password_hash):
+        register_login_failure(username)
         raise HTTPException(401, "Usuario o contraseña incorrectos")
+    clear_login_failures(username)
     return {"token": create_token(user.id), "user": user_out(user)}
 
 

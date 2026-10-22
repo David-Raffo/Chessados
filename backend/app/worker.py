@@ -12,8 +12,9 @@ import chess
 import chess.engine
 import chess.pgn
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
-from .config import ANALYSIS_DEPTH, ANALYSIS_THREADS, STOCKFISH_PATH
+from .config import ANALYSIS_DEPTH, ANALYSIS_THREADS, QUICK_DEPTH, STOCKFISH_PATH
 from .main import init_db
 from .db import SessionLocal
 from .models import Game, GameAnalysis
@@ -74,7 +75,7 @@ def score_cp(info: chess.engine.InfoDict) -> tuple[int, int | None]:
     return max(-MATE_CP, min(MATE_CP, score.score(mate_score=MATE_CP))), score.mate()
 
 
-def analyse_game(engine: chess.engine.SimpleEngine, game: Game) -> tuple[list[GameAnalysis], float | None]:
+def analyse_game(engine: chess.engine.SimpleEngine, game: Game, depth: int) -> tuple[list[GameAnalysis], float | None]:
     parsed = chess.pgn.read_game(io.StringIO(game.pgn))
     if parsed is None:
         raise ValueError("PGN no válido")
@@ -91,7 +92,7 @@ def analyse_game(engine: chess.engine.SimpleEngine, game: Game) -> tuple[list[Ga
             cp = 0 if outcome.winner is None else (MATE_CP if outcome.winner else -MATE_CP)
             infos.append({"cp": cp, "mate": None, "pv": []})
         else:
-            info = engine.analyse(b, chess.engine.Limit(depth=ANALYSIS_DEPTH))
+            info = engine.analyse(b, chess.engine.Limit(depth=depth))
             cp, mate = score_cp(info)
             infos.append({"cp": cp, "mate": mate, "pv": info.get("pv", [])})
         if i < len(moves):
@@ -137,37 +138,74 @@ def analyse_game(engine: chess.engine.SimpleEngine, game: Game) -> tuple[list[Ga
     return rows, accuracy
 
 
-def claim_next() -> int | None:
+# Estados: pending → (pasada rápida) running → quick → (pasada profunda) refining → done.
+# La pasada rápida se ve en segundos; la profunda afina el resultado en segundo plano.
+# Las pasadas rápidas de partidas nuevas tienen prioridad sobre las profundas.
+
+
+def claim_next() -> tuple[int, str] | None:
     with SessionLocal() as db:
-        game = db.scalars(
-            select(Game)
-            .where(Game.analysis_status == "pending")
-            .order_by(Game.created_at.desc())  # primero lo recién jugado
-            .limit(1)
-            .with_for_update(skip_locked=True)
-        ).first()
-        if game is None:
-            return None
-        game.analysis_status = "running"
-        db.commit()
-        return game.id
+        for status, claimed, kind in (("pending", "running", "quick"), ("quick", "refining", "deep")):
+            game = db.scalars(
+                select(Game)
+                .where(Game.analysis_status == status)
+                .order_by(Game.created_at.desc())  # primero lo recién jugado
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            ).first()
+            if game is not None:
+                game.analysis_status = claimed
+                db.commit()
+                return game.id, kind
+    return None
 
 
-def process(engine: chess.engine.SimpleEngine, game_id: int) -> None:
+class EngineDied(Exception):
+    """Stockfish se ha caído: hay que arrancar otro y repetir la partida."""
+
+
+def process(engine: chess.engine.SimpleEngine, game_id: int, kind: str) -> None:
+    depth = QUICK_DEPTH if kind == "quick" else ANALYSIS_DEPTH
     with SessionLocal() as db:
         game = db.get(Game, game_id)
+        if game is None:  # borrada mientras esperaba
+            return
         try:
             start = time.time()
-            rows, accuracy = analyse_game(engine, game)
+            rows, accuracy = analyse_game(engine, game, depth)
             game.analysis.clear()
             game.analysis.extend(rows)
             game.accuracy = accuracy
-            game.analysis_status = "done"
-            log.info("partida %s analizada (%d jugadas, %.0fs)", game_id, len(rows), time.time() - start)
+            game.analysis_depth = depth
+            game.analysis_status = "quick" if kind == "quick" else "done"
+            log.info("partida %s: pasada %s (prof. %d, %d jugadas, %.1fs)",
+                     game_id, kind, depth, len(rows), time.time() - start)
+        except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as e:
+            # No es culpa de la partida: vuelve a la cola y se analiza con un Stockfish nuevo
+            game.analysis_status = "pending" if kind == "quick" else "quick"
+            _safe_commit(db, game_id)
+            raise EngineDied() from e
         except Exception:
             log.exception("error analizando la partida %s", game_id)
-            game.analysis_status = "error"
+            # Si falla la profunda, se queda con la rápida
+            game.analysis_status = "done" if kind == "deep" and game.analysis else "error"
+        _safe_commit(db, game_id)
+
+
+def _safe_commit(db, game_id: int) -> None:
+    """Si la partida se borró mientras se analizaba, se descarta el resultado sin tumbar el worker."""
+    try:
         db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        log.warning("la partida %s ya no existe; se descarta su análisis", game_id)
+
+
+def start_engine() -> chess.engine.SimpleEngine:
+    engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+    engine.configure({"Threads": ANALYSIS_THREADS, "Hash": 128})
+    log.info("Stockfish listo: %s, profundidad %d", engine.id.get("name"), ANALYSIS_DEPTH)
+    return engine
 
 
 def main() -> None:
@@ -175,20 +213,31 @@ def main() -> None:
     init_db()
     with SessionLocal() as db:
         # Si el worker murió a mitad de un análisis, se reintenta
-        for g in db.scalars(select(Game).where(Game.analysis_status == "running")):
-            g.analysis_status = "pending"
+        for g in db.scalars(select(Game).where(Game.analysis_status.in_(["running", "refining"]))):
+            g.analysis_status = "pending" if g.analysis_status == "running" else "quick"
         db.commit()
 
-    engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-    engine.configure({"Threads": ANALYSIS_THREADS, "Hash": 128})
-    log.info("worker listo: %s, profundidad %d", engine.id.get("name"), ANALYSIS_DEPTH)
+    engine = start_engine()
     try:
         while True:
-            game_id = claim_next()
-            if game_id is None:
-                time.sleep(2)
-                continue
-            process(engine, game_id)
+            try:
+                job = claim_next()
+                if job is None:
+                    time.sleep(1)
+                    continue
+                process(engine, *job)
+            except EngineDied:
+                log.warning("Stockfish se ha caído; arranco uno nuevo")
+                try:
+                    engine.quit()
+                except Exception:
+                    pass
+                time.sleep(1)
+                engine = start_engine()
+            except Exception:
+                # Un fallo puntual (p. ej. la base de datos reiniciándose) no debe parar el worker
+                log.exception("error en el bucle del worker")
+                time.sleep(5)
     finally:
         engine.quit()
 

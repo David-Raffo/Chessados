@@ -70,6 +70,8 @@ def create_set(body: CreateIn, user: User = Depends(current_user), db: Session =
             select(Puzzle.id).where(Puzzle.id.notin_(ids)).order_by(func.abs(Puzzle.rating - rating))
             .limit(body.size - len(ids))
         ))
+    if not ids:
+        raise HTTPException(400, "Todavía no hay puzzles en la base de datos. Espera a que termine el importador.")
     for old in db.scalars(select(WoodpeckerSet).where(WoodpeckerSet.user_id == user.id, WoodpeckerSet.active.is_(True))):
         old.active = False
     s = WoodpeckerSet(user_id=user.id, puzzle_ids=ids, active=True)

@@ -5,7 +5,7 @@ import confetti from "canvas-confetti";
 import Board, { isPromotion, toDests, turnColor, uciToKeys, type Color, type DrawShape, type Key } from "../components/Board";
 import Promotion from "../components/Promotion";
 import { api } from "../lib/api";
-import { Engine } from "../lib/engine";
+import { Engine, EngineClosedError } from "../lib/engine";
 import { sound } from "../lib/sound";
 import { useActivity } from "../lib/useActivity";
 
@@ -170,8 +170,9 @@ function LessonView({ lesson, lessons, onDone }: { lesson: Lesson; lessons: Less
       if (moves >= lesson.moves && c.turn() !== me) {
         if (lesson.goal === "draw") {
           // Has aguantado: se comprueba que la posición no esté perdida
-          const { cp } = await engine.current!.evaluate(c.fen(), 14);
-          const mine = me === "w" ? cp : -cp;
+          const r = await engine.current?.evaluate(c.fen(), 14).catch(() => null);
+          if (!r) return true; // motor cerrado (reinicio o cambio de lección)
+          const mine = me === "w" ? r.cp : -r.cp;
           finish(mine >= -150, mine >= -150 ? "Has aguantado: la posición es de tablas." : "Has aguantado, pero la posición está perdida.", moves);
         } else {
           finish(false, `Se acabaron las ${lesson.moves} jugadas.`, moves);
@@ -188,9 +189,11 @@ function LessonView({ lesson, lessons, onDone }: { lesson: Lesson; lessons: Less
       const eng = engine.current;
       if (!eng || finished.current) return;
       setThinking(true);
+      const fenBefore = chess.current.fen();
       try {
-        const uci = await eng.bestMove(chess.current.fen(), "movetime 500");
-        if (finished.current || !uci || uci === "(none)") return;
+        const uci = await eng.bestMove(fenBefore, "movetime 500");
+        // Si mientras pensaba se reinició la lección, su jugada ya no vale
+        if (finished.current || chess.current.fen() !== fenBefore || !uci || uci === "(none)") return;
         const [from, to] = uciToKeys(uci);
         const m = chess.current.move({ from, to, promotion: uci[4] ?? "q" });
         setLastMove([from, to]);
@@ -199,6 +202,8 @@ function LessonView({ lesson, lessons, onDone }: { lesson: Lesson; lessons: Less
         else if (m.captured) sound.capture();
         else sound.move();
         await check(moves);
+      } catch (e) {
+        if (!(e instanceof EngineClosedError)) console.error(e);
       } finally {
         setThinking(false);
       }
@@ -215,7 +220,8 @@ function LessonView({ lesson, lessons, onDone }: { lesson: Lesson; lessons: Less
       .then(() => eng.newGame())
       .then(() => {
         if (chess.current.turn() !== me) engineMove(0);
-      });
+      })
+      .catch(() => undefined); // motor cerrado antes de arrancar
     return () => {
       eng.terminate();
       engine.current = null;
@@ -249,7 +255,8 @@ function LessonView({ lesson, lessons, onDone }: { lesson: Lesson; lessons: Less
 
   async function showHint() {
     if (!engine.current || status !== "playing") return;
-    const { pv } = await engine.current.evaluate(chess.current.fen(), 16);
+    const r = await engine.current.evaluate(chess.current.fen(), 16).catch(() => null);
+    const pv = r?.pv ?? [];
     if (pv[0]) {
       const [orig, dest] = uciToKeys(pv[0]);
       setHint([{ orig, dest, brush: "green" }]);
@@ -267,6 +274,7 @@ function LessonView({ lesson, lessons, onDone }: { lesson: Lesson; lessons: Less
     setUserMoves(0);
     setHint([]);
     setResult(null);
+    setThinking(false); // la petición al motor anterior se cancela al cerrarlo
     setRound((r) => r + 1);
   }
 
