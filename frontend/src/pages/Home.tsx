@@ -35,6 +35,12 @@ export default function Home() {
     setActiveStep(i); // activa la barra de «Entrenamiento en curso» en el resto de pantallas
     navigate(stepLink(step));
   };
+  // Las sugerencias extra son libres: no activan la barra de la sesión
+  const goExtra = (step: PlanStep) => {
+    setActiveStep(null);
+    navigate(stepLink(step));
+  };
+  const extras = plan?.extras ?? [];
   const nextIndex = plan ? plan.steps.findIndex((s) => !s.done) : -1;
   const started = !!plan?.steps.some((s) => (s.progress ?? 0) > 0);
   const finished = !!plan && nextIndex === -1;
@@ -84,12 +90,45 @@ export default function Home() {
             disabled={!plan}
             onClick={() => {
               if (!plan) return;
-              const i = finished ? 0 : nextIndex;
-              go(plan.steps[i], i);
+              if (finished) {
+                if (extras[0]) goExtra(extras[0]);
+                return;
+              }
+              go(plan.steps[nextIndex], nextIndex);
             }}
           >
-            {finished ? "¡Sesión completada! Seguir entrenando" : started ? "Continuar entrenamiento" : "Entrenar hoy"} →
+            {finished ? "Seguir entrenando" : started ? "Continuar entrenamiento" : "Entrenar hoy"} →
           </button>
+          {finished && (
+            <div className="space-y-2 rounded-xl border border-good/40 bg-good/10 p-4">
+              <p className="font-semibold text-good">🎉 ¡Sesión de hoy completada!</p>
+              {extras.length > 0 && (
+                <>
+                  <p className="text-sm text-muted">Si te apetece seguir, tu entrenador te sugiere:</p>
+                  <ul className="space-y-2">
+                    {extras.map((x, i) => (
+                      <li key={i}>
+                        <button
+                          onClick={() => goExtra(x)}
+                          className="flex w-full items-center gap-3 rounded-xl border border-line bg-panel p-3 text-left transition hover:bg-panel2"
+                        >
+                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${AREA_BG[x.area]}`} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-medium">
+                              {x.title}
+                              {x.theme && x.theme !== "endgame" && <span className="text-muted"> · {themeLabel(x.theme)}</span>}
+                            </span>
+                            {x.reason && <span className="block text-sm text-muted">{x.reason}</span>}
+                          </span>
+                          <span className="shrink-0 text-sm text-muted">{x.minutes} min</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
           <ol className="space-y-2">
             {plan?.steps.map((s, i) => {
               const isDone = !!s.done;

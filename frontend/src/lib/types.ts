@@ -71,6 +71,9 @@ export interface PlanStep {
   status?: string;
   seconds?: number;
   target_seconds?: number;
+  /** Solo en sugerencias extra */
+  reason?: string;
+  review?: boolean;
 }
 
 export interface Advice {
@@ -88,4 +91,6 @@ export interface CoachPlan {
   steps: PlanStep[];
   advice: Advice[];
   weak_themes: { theme: string; attempts: number; accuracy: number; avg_seconds: number }[];
+  /** Actividades extra para cuando la sesión está completa */
+  extras?: PlanStep[];
 }

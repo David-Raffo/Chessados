@@ -12,6 +12,7 @@ export function stepLink(s: PlanStep): string {
   switch (s.kind) {
     case "puzzles": {
       const q = new URLSearchParams();
+      if (s.review) return "/puzzles?review=1";
       if (s.area === "endgames") q.set("area", "endgames");
       if (s.theme && s.theme !== "endgame") q.set("theme", s.theme);
       const qs = q.toString();
