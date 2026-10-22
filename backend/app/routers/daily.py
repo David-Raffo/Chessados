@@ -22,15 +22,25 @@ def _seed(text: str) -> int:
     return int(hashlib.sha256(text.encode()).hexdigest()[:12], 16)
 
 
+_daily_cache: dict[str, str] = {}  # día → id del puzzle (se consulta a menudo desde el plan del día)
+
+
 def daily_puzzle(db: Session) -> Puzzle | None:
     """El mismo para todos los usuarios de la instalación: popular y de dificultad media."""
+    day = today().isoformat()
+    if day in _daily_cache:
+        return db.get(Puzzle, _daily_cache[day])
     base = select(Puzzle).where(
         Puzzle.popularity >= 93, Puzzle.nb_plays >= 3000, Puzzle.rating.between(1300, 1900)
     )
     n = db.scalar(select(func.count()).select_from(base.subquery()))
     if not n:
         return None
-    return db.scalars(base.order_by(Puzzle.id).offset(_seed(today().isoformat()) % n).limit(1)).first()
+    p = db.scalars(base.order_by(Puzzle.id).offset(_seed(day) % n).limit(1)).first()
+    if p:
+        _daily_cache.clear()
+        _daily_cache[day] = p.id
+    return p
 
 
 def own_position(db: Session, user: User) -> dict | None:

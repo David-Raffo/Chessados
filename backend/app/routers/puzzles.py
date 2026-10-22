@@ -3,7 +3,8 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import ARRAY, Text, cast, exists, func, literal_column, select
+from sqlalchemy import ARRAY, Text, cast, exists, func, literal_column, select, tablesample
+from sqlalchemy.orm import aliased
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.orm import Session
 
@@ -72,9 +73,13 @@ def next_puzzle(
 
     rating, _, _ = current_rating(db, user.id, "endgames" if area == "endgames" else "tactics")
     attempted = exists().where(PuzzleAttempt.user_id == user.id, PuzzleAttempt.puzzle_id == Puzzle.id)
-    for window in (100, 250, 600, 3000):
+    # Con un millón de puzzles, sortear entre todos los de tu franja de ELO es lento: se elige un punto
+    # al azar de la franja (±100) y se sortea en una banda estrecha a su alrededor, que se ensancha
+    # si no hay puzzles (temas raros, niveles extremos).
+    center = rating + random.uniform(-100, 100)
+    for width in (15, 50, 150, 400, 3000):
         q = select(Puzzle).where(
-            Puzzle.rating.between(rating - window, rating + window), ~attempted
+            Puzzle.rating.between(center - width, center + width), ~attempted
         )
         if theme:
             q = q.where(_theme_filter(theme))
@@ -153,9 +158,13 @@ def rush_set(user: User = Depends(current_user), db: Session = Depends(get_db)):
     tactics = current_rating(db, user.id, "tactics")[0]
     start = max(500, tactics - 550)
     end = start + 1600
-    pool = db.scalars(
-        select(Puzzle).where(Puzzle.rating.between(start, end)).order_by(func.random()).limit(3000)
-    ).all()
+    # Muestra aleatoria por bloques (TABLESAMPLE): no hace falta ordenar cientos de miles de filas
+    sample = aliased(Puzzle, tablesample(Puzzle.__table__, func.system(3)))
+    pool = db.scalars(select(sample).where(sample.rating.between(start, end)).limit(6000)).all()
+    if len(pool) < 500:  # base de datos pequeña: muestra completa
+        pool = db.scalars(
+            select(Puzzle).where(Puzzle.rating.between(start, end)).order_by(func.random()).limit(3000)
+        ).all()
     pool = [p for p in pool if len(p.moves.split()) <= 6]
     if not pool:
         raise HTTPException(404, "No hay puzzles disponibles. ¿Se ha ejecutado el importador?")
