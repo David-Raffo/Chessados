@@ -1,0 +1,69 @@
+name: chessados
+
+x-backend: &backend
+  build: ./backend
+  restart: unless-stopped
+  environment:
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD:-chess}@db:5432/${POSTGRES_DB:-chess}
+    JWT_SECRET: ${JWT_SECRET:-cambia-este-secreto}
+    APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Madrid}
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chess}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chess}
+      POSTGRES_DB: ${POSTGRES_DB:-chess}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chess} -d ${POSTGRES_DB:-chess}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # API REST (FastAPI)
+  api:
+    <<: *backend
+
+  # Revisa partidas con Stockfish nativo, cola en PostgreSQL
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD:-chess}@db:5432/${POSTGRES_DB:-chess}
+      ANALYSIS_DEPTH: ${ANALYSIS_DEPTH:-18}
+      ANALYSIS_THREADS: ${ANALYSIS_THREADS:-2}
+
+  # Descarga una vez los puzzles de Lichess y termina
+  importer:
+    <<: *backend
+    restart: "no"
+    command: ["python", "-m", "app.import_puzzles"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD:-chess}@db:5432/${POSTGRES_DB:-chess}
+      PUZZLE_LIMIT: ${PUZZLE_LIMIT:-150000}
+    volumes:
+      - ./data:/data:ro
+
+  # Rival con juego humano: Maia 1100–1900 sobre lc0 (la primera compilación tarda varios minutos)
+  maia:
+    build: ./maia
+    restart: unless-stopped
+
+  # Frontend React compilado y servido por nginx; /api se redirige al contenedor api
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

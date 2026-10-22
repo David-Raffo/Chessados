@@ -1,0 +1,117 @@
+@import "@lichess-org/chessground/assets/chessground.base.css";
+@import "@lichess-org/chessground/assets/chessground.brown.css";
+@import "@lichess-org/chessground/assets/chessground.cburnett.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 244 245 248;
+  --panel: 255 255 255;
+  --panel-2: 236 238 243;
+  --line: 222 225 232;
+  --fg: 24 26 33;
+  --muted: 102 108 124;
+  --tactics: 217 119 6;
+  --play: 2 132 199;
+  --endgames: 5 150 105;
+  --openings: 124 58 237;
+  --rush: 225 29 72;
+  --good: 22 163 74;
+  --bad: 220 38 38;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: 17 19 24;
+  --panel: 26 29 36;
+  --panel-2: 34 38 47;
+  --line: 45 50 61;
+  --fg: 232 233 238;
+  --muted: 148 154 170;
+  --tactics: 245 158 11;
+  --play: 56 189 248;
+  --endgames: 52 211 153;
+  --openings: 167 139 250;
+  --rush: 251 113 133;
+  --good: 74 222 128;
+  --bad: 248 113 113;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-bg text-fg font-sans antialiased;
+}
+
+/* Tablero: ocupa el ancho disponible y mantiene proporción cuadrada */
+.board-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+}
+.board-wrap .cg-wrap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+cg-board square.move-dest {
+  background: radial-gradient(rgba(20, 85, 30, 0.45) 22%, rgba(0, 0, 0, 0) 23%);
+}
+cg-board square.oc.move-dest {
+  background: radial-gradient(transparent 0%, transparent 79%, rgba(20, 85, 0, 0.35) 80%);
+}
+.cg-wrap coords {
+  font-weight: 600;
+}
+
+/* Variantes de color del tablero (Ajustes) */
+.board-blue cg-board {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Crect width='8' height='8' fill='%23dee3e6'/%3E%3Cpath fill='%238ca2ad' d='M1 0h1v1H1zM3 0h1v1H3zM5 0h1v1H5zM7 0h1v1H7zM0 1h1v1H0zM2 1h1v1H2zM4 1h1v1H4zM6 1h1v1H6zM1 2h1v1H1zM3 2h1v1H3zM5 2h1v1H5zM7 2h1v1H7zM0 3h1v1H0zM2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6zM1 4h1v1H1zM3 4h1v1H3zM5 4h1v1H5zM7 4h1v1H7zM0 5h1v1H0zM2 5h1v1H2zM4 5h1v1H4zM6 5h1v1H6zM1 6h1v1H1zM3 6h1v1H3zM5 6h1v1H5zM7 6h1v1H7zM0 7h1v1H0zM2 7h1v1H2zM4 7h1v1H4zM6 7h1v1H6z'/%3E%3C/svg%3E");
+}
+.board-green cg-board {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Crect width='8' height='8' fill='%23ffffdd'/%3E%3Cpath fill='%2386a666' d='M1 0h1v1H1zM3 0h1v1H3zM5 0h1v1H5zM7 0h1v1H7zM0 1h1v1H0zM2 1h1v1H2zM4 1h1v1H4zM6 1h1v1H6zM1 2h1v1H1zM3 2h1v1H3zM5 2h1v1H5zM7 2h1v1H7zM0 3h1v1H0zM2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6zM1 4h1v1H1zM3 4h1v1H3zM5 4h1v1H5zM7 4h1v1H7zM0 5h1v1H0zM2 5h1v1H2zM4 5h1v1H4zM6 5h1v1H6zM1 6h1v1H1zM3 6h1v1H3zM5 6h1v1H5zM7 6h1v1H7zM0 7h1v1H0zM2 7h1v1H2zM4 7h1v1H4zM6 7h1v1H6z'/%3E%3C/svg%3E");
+}
+
+.flash-good {
+  box-shadow: 0 0 0 4px rgb(var(--good) / 0.8);
+  transition: box-shadow 0.2s;
+}
+.flash-bad {
+  box-shadow: 0 0 0 4px rgb(var(--bad) / 0.8);
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-panel p-4 shadow-sm;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 font-semibold transition
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-fg text-bg hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply btn border border-line bg-panel hover:bg-panel2;
+  }
+  .input {
+    @apply w-full rounded-xl border border-line bg-panel2 px-3 py-2 outline-none focus:border-play;
+  }
+  .label {
+    @apply mb-1 block text-sm font-medium text-muted;
+  }
+  .chip {
+    @apply rounded-full border border-line px-3 py-1 text-sm transition hover:bg-panel2;
+  }
+  .chip-on {
+    @apply border-fg bg-fg text-bg hover:bg-fg;
+  }
+}

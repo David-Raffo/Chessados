@@ -1,0 +1,8 @@
+.env
+node_modules/
+frontend/dist/
+frontend/public/stockfish/
+__pycache__/
+*.pyc
+data/*.zst
+data/*.csv

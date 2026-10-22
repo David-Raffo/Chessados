@@ -1,0 +1,10 @@
+﻿fastapi==0.115.6
+uvicorn[standard]==0.32.1
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+chess==1.11.1
+PyJWT==2.10.1
+bcrypt==4.2.1
+httpx==0.28.1
+zstandard==0.23.0
+pydantic==2.10.3
