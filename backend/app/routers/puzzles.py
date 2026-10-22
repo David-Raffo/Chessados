@@ -29,9 +29,16 @@ def puzzle_out(p: Puzzle) -> dict:
     }
 
 
-def _theme_filter(theme: str):
-    # Usa el índice GIN ix_puzzles_themes (lista de temas del puzzle). El separador va como constante en
-    # el SQL para que la expresión coincida con la del índice.
+def _theme_filter(theme: str, indexed: bool = True):
+    """Filtro por tema.
+
+    indexed=True usa el índice GIN ix_puzzles_themes: ideal para temas raros o rangos amplios.
+    indexed=False comprueba el texto puzzle a puzzle: más rápido en bandas de ELO estrechas con temas
+    frecuentes («final», «horquilla»), donde el índice tendría que recorrer cientos de miles de entradas.
+    """
+    if not indexed:
+        return (" " + Puzzle.themes + " ").like(f"% {theme} %")
+    # El separador va como constante en el SQL para que la expresión coincida con la del índice
     themes = func.string_to_array(Puzzle.themes, literal_column("' '"))
     return themes.op("@>")(cast(array([theme]), ARRAY(Text)))
 
@@ -82,7 +89,7 @@ def next_puzzle(
             Puzzle.rating.between(center - width, center + width), ~attempted
         )
         if theme:
-            q = q.where(_theme_filter(theme))
+            q = q.where(_theme_filter(theme, indexed=width > 50))
         p = db.scalars(q.order_by(func.random()).limit(1)).first()
         if p:
             if assigned:
