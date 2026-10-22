@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Invites from "../components/Invites";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { AREA_LABEL, AREA_TEXT, formatDuration } from "../lib/labels";
@@ -140,6 +141,8 @@ export default function Settings() {
         </button>
         {msg && <span className="text-sm text-muted">{msg}</span>}
       </div>
+
+      <Invites />
 
       <section className="card space-y-4">
         <h2 className="font-bold">Este dispositivo</h2>

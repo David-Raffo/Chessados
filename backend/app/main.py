@@ -22,6 +22,11 @@ def migrate(conn) -> None:
         conn.execute(text("UPDATE users SET username = left(lower(split_part(username, '@', 1)), 24) || '_' || id"))
         conn.execute(text("ALTER TABLE users ALTER COLUMN username TYPE VARCHAR(30)"))
         conn.execute(text("ALTER INDEX IF EXISTS ix_users_email RENAME TO ix_users_username"))
+    if columns and "is_admin" not in columns:
+        # Invitaciones: la cuenta más antigua pasa a ser la de administrador
+        conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN invited_by INTEGER REFERENCES users(id) ON DELETE SET NULL"))
+        conn.execute(text("UPDATE users SET is_admin = true WHERE id = (SELECT min(id) FROM users)"))
 
 
 def init_db(retries: int = 30) -> None:

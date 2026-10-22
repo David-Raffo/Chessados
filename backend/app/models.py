@@ -34,7 +34,23 @@ class User(Base):
     endgame_boost_until: Mapped[date | None] = mapped_column(Date, nullable=True)
     lichess_username: Mapped[str | None] = mapped_column(String(80), nullable=True)
     chesscom_username: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # El administrador (la primera cuenta) tiene invitaciones ilimitadas
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    invited_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Invite(Base):
+    """Código de invitación de un solo uso para crear cuenta."""
+
+    __tablename__ = "invites"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    used_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Rating(Base):

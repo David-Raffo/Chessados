@@ -5,6 +5,7 @@ export interface User {
   id: number;
   name: string;
   username: string;
+  is_admin: boolean;
   weekly_hours: number;
   target_split: Record<Area, number>;
   ladder_elo: number;

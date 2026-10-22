@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 const LEVELS = [
@@ -7,14 +8,25 @@ const LEVELS = [
   { value: 1600, label: "Avanzado", hint: "Club o +1600 online" },
 ];
 
+// Enlace de invitación: https://…/?invitacion=ABCD-EFGH abre el registro con el código puesto
+const linkCode = new URLSearchParams(window.location.search).get("invitacion") ?? "";
+
 export default function Login() {
   const { login, register } = useAuth();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register">(linkCode ? "register" : "login");
+  const [inviteCode, setInviteCode] = useState(linkCode);
+  const [firstAccount, setFirstAccount] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [level, setLevel] = useState(1200);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<{ first_account: boolean }>("/auth/setup")
+      .then((r) => setFirstAccount(r.first_account))
+      .catch(() => undefined);
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -22,7 +34,8 @@ export default function Login() {
     setBusy(true);
     try {
       if (mode === "login") await login(username, password);
-      else await register({ username, password, level });
+      else await register({ username, password, level, invite_code: firstAccount ? null : inviteCode });
+      if (linkCode) window.history.replaceState(null, "", "/");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -79,6 +92,27 @@ export default function Login() {
             required
           />
         </div>
+        {mode === "register" &&
+          (firstAccount ? (
+            <p className="rounded-xl bg-panel2 p-3 text-sm">
+              Es la primera cuenta de esta instalación: no necesita invitación y será la de administrador, con
+              invitaciones ilimitadas.
+            </p>
+          ) : (
+            <div>
+              <label className="label">Código de invitación</label>
+              <input
+                className="input font-mono uppercase tracking-wider"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                placeholder="ABCD-EFGH"
+                autoCapitalize="characters"
+                autoComplete="off"
+                required
+              />
+              <p className="mt-1 text-xs text-muted">Pídeselo a alguien que ya tenga cuenta.</p>
+            </div>
+          ))}
         {mode === "register" && (
           <div>
             <label className="label">¿Qué nivel tienes?</label>
