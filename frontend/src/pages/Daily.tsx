@@ -140,28 +140,21 @@ function DailyPuzzle({ puzzle, done, onDone }: { puzzle: Puzzle; done?: { succes
   );
 }
 
+const OWN_TRIES = 3;
+
 function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean }; onDone: (ok: boolean) => void }) {
   const chess = useMemo(() => new Chess(own.fen), [own.fen]);
   const [fen, setFen] = useState(own.fen);
   const [result, setResult] = useState<boolean | null>(null);
+  const [tried, setTried] = useState<string[]>([]); // jugadas equivocadas (SAN)
+  const [shake, setShake] = useState(false);
+  const [note, setNote] = useState("");
   const [shapes, setShapes] = useState<DrawShape[]>([]);
+  const left = OWN_TRIES - tried.length;
 
-  function onMove(from: Key, to: Key) {
-    if (result !== null) return;
-    const ok = `${from}${to}` === own.best_uci.slice(0, 4);
-    const c = new Chess(own.fen);
-    try {
-      c.move({ from, to, promotion: own.best_uci[4] ?? "q" });
-      setFen(c.fen());
-    } catch {
-      return;
-    }
+  function finish(ok: boolean) {
     setResult(ok);
-    if (ok) {
-      sound.good();
-      confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 }, disableForReducedMotion: true });
-    } else {
-      sound.bad();
+    if (!ok) {
       const [orig, dest] = uciToKeys(own.best_uci);
       setShapes([{ orig, dest, brush: "green" }]);
       setFen(own.fen);
@@ -169,9 +162,40 @@ function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean };
     if (!done) onDone(ok);
   }
 
+  function onMove(from: Key, to: Key) {
+    if (result !== null) return;
+    const c = new Chess(own.fen);
+    let san: string;
+    try {
+      san = c.move({ from, to, promotion: own.best_uci[4] ?? "q" }).san;
+    } catch {
+      return;
+    }
+    if (`${from}${to}` === own.best_uci.slice(0, 4)) {
+      setFen(c.fen());
+      sound.good();
+      confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 }, disableForReducedMotion: true });
+      finish(true);
+      return;
+    }
+    // Fallo: la pieza vuelve a su sitio y, si quedan intentos, se puede probar otra jugada
+    setFen(own.fen);
+    sound.bad();
+    setShake(true);
+    window.setTimeout(() => setShake(false), 400);
+    if (tried.includes(san)) {
+      setNote(`Ya probaste ${san}. Busca otra jugada.`);
+      return;
+    }
+    const next = [...tried, san];
+    setTried(next);
+    setNote(san === own.played_san ? `${san} es lo que jugaste en la partida: precisamente el error.` : `${san} no es la mejor.`);
+    if (next.length >= OWN_TRIES) finish(false);
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
-      <div className={`mx-auto w-full max-w-[min(100%,calc(100vh-14rem))] rounded-md ${result === false ? "flash-bad animate-shake" : ""} ${result ? "flash-good" : ""}`}>
+      <div className={`mx-auto w-full max-w-[min(100%,calc(100vh-14rem))] rounded-md ${shake ? "flash-bad animate-shake" : ""} ${result ? "flash-good" : ""}`}>
         <Board
           fen={fen}
           orientation={own.user_color}
@@ -181,13 +205,35 @@ function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean };
           onMove={onMove}
         />
       </div>
-      <aside className="card h-fit space-y-2">
+      <aside className="card h-fit space-y-3">
         <h2 className="font-bold">Encuentra la mejor jugada</h2>
         <p className="text-sm text-muted">
           En esta posición de una de tus partidas jugaste {own.played_san} ({CLASS_LABEL[own.classification]?.toLowerCase()}). ¿Qué era mejor?
         </p>
-        {result === true && <p className="font-semibold text-good">¡Exacto! {own.best_san} era lo mejor.</p>}
-        {result === false && <p className="font-semibold text-bad">No. Lo mejor era {own.best_san}.</p>}
+        {result === null && (
+          <>
+            <div className="flex items-center gap-1.5 text-sm">
+              <span className="text-muted">Intentos:</span>
+              {Array.from({ length: OWN_TRIES }, (_, i) => (
+                <span key={i} className={`h-2.5 w-2.5 rounded-full ${i < tried.length ? "bg-bad" : "bg-line"}`} />
+              ))}
+              <span className="text-muted">
+                · te queda{left === 1 ? "" : "n"} {left}
+              </span>
+            </div>
+            {note && <p className="text-sm font-semibold text-bad">{note}</p>}
+            <button className="btn-ghost w-full" onClick={() => finish(false)}>
+              Ver solución
+            </button>
+          </>
+        )}
+        {result === true && (
+          <p className="font-semibold text-good">
+            ¡Exacto! {own.best_san} era lo mejor{tried.length ? ` (al ${tried.length + 1}.º intento)` : ""}.
+          </p>
+        )}
+        {result === false && <p className="font-semibold text-bad">Lo mejor era {own.best_san} (flecha verde).</p>}
+        {tried.length > 0 && <p className="text-xs text-muted">Probaste: {tried.join(", ")}</p>}
         <Link className="text-sm underline" to={`/revision/${own.game_id}`}>
           Ver la partida
         </Link>

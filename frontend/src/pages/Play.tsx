@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Chess } from "chess.js";
 import confetti from "canvas-confetti";
 import Board, { isPromotion, toDests, turnColor, type Color, type Key } from "../components/Board";
+import { Captured, material, type MaterialInfo } from "../components/Material";
 import Promotion from "../components/Promotion";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -416,6 +417,7 @@ function GameView({
 
   const userTurn = !outcome && turnColor(chess.current) === color && !thinking;
   const dests = useMemo(() => toDests(chess.current), [fen]);
+  const mat = useMemo(() => material(fen), [fen]);
   const history = chess.current.history();
   const opp: Color = color === "white" ? "black" : "white";
   const top = orientation === color ? opp : color;
@@ -429,6 +431,8 @@ function GameView({
       <div className="mx-auto w-full max-w-[min(100%,calc(100vh-10rem))]">
         <ClockRow
           name={top === color ? "Tú" : rivalName}
+          side={top}
+          info={mat}
           ms={clockView[top]}
           active={!outcome && turnColor(chess.current) === top}
           thinking={thinking && top !== color}
@@ -460,6 +464,8 @@ function GameView({
         </div>
         <ClockRow
           name={bottom === color ? "Tú" : rivalName}
+          side={bottom}
+          info={mat}
           ms={clockView[bottom]}
           active={!outcome && turnColor(chess.current) === bottom}
           thinking={thinking && bottom !== color}
@@ -537,12 +543,29 @@ function Delta({ value }: { value: number }) {
   return <span className={value > 0 ? "text-good" : "text-bad"}>{value > 0 ? `+${value}` : value}</span>;
 }
 
-function ClockRow({ name, ms, active, thinking }: { name: string; ms: number; active: boolean; thinking: boolean }) {
+function ClockRow({
+  name,
+  side,
+  info,
+  ms,
+  active,
+  thinking,
+}: {
+  name: string;
+  side: Color;
+  info: MaterialInfo;
+  ms: number;
+  active: boolean;
+  thinking: boolean;
+}) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="font-semibold">
-        {name}
-        {thinking && <span className="ml-2 animate-pulse text-sm text-muted">pensando…</span>}
+    <div className="flex items-center justify-between gap-3">
+      <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-semibold">
+          {name}
+          {thinking && <span className="ml-2 animate-pulse text-sm text-muted">pensando…</span>}
+        </span>
+        <Captured info={info} side={side} />
       </span>
       <span
         className={`rounded-lg px-3 py-1 font-mono text-xl font-bold tabular-nums ${
