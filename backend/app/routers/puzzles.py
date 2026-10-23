@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import ARRAY, Text, cast, exists, func, literal_column, select, tablesample
 from sqlalchemy.orm import aliased
-from sqlalchemy.dialects.postgresql import array
+from sqlalchemy.dialects.postgresql import array, insert as pg_insert
 from sqlalchemy.orm import Session
 
 from ..auth import current_user
@@ -94,9 +94,20 @@ def next_puzzle(
         if p:
             if assigned:
                 assigned.puzzle_id = p.id
-            else:
-                db.add(PuzzleAssignment(user_id=user.id, filter_key=key, puzzle_id=p.id))
+                db.commit()
+                return {**puzzle_out(p), "review": False}
+            # Dos peticiones a la vez (recargas rápidas) pueden asignar a la vez: gana la primera
+            # y la otra devuelve ese mismo puzzle
+            db.execute(
+                pg_insert(PuzzleAssignment)
+                .values(user_id=user.id, filter_key=key, puzzle_id=p.id)
+                .on_conflict_do_nothing(index_elements=["user_id", "filter_key"])
+            )
             db.commit()
+            won = db.scalar(select(PuzzleAssignment.puzzle_id).where(
+                PuzzleAssignment.user_id == user.id, PuzzleAssignment.filter_key == key))
+            if won and won != p.id and (other := db.get(Puzzle, won)):
+                p = other
             return {**puzzle_out(p), "review": False}
     raise HTTPException(404, "No hay puzzles disponibles. ¿Se ha ejecutado el importador?")
 

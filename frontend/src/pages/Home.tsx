@@ -76,7 +76,7 @@ export default function Home() {
       )}
 
       <section className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
-        <div className="card space-y-4 p-6">
+        <div className="card space-y-4 p-4 sm:p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-bold">Sesión de hoy</h2>
@@ -86,7 +86,7 @@ export default function Home() {
             </div>
           </div>
           <button
-            className="btn-primary w-full py-4 text-xl"
+            className="btn-primary w-full py-3 text-lg sm:py-4 sm:text-xl"
             disabled={!plan}
             onClick={() => {
               if (!plan) return;
@@ -152,13 +152,15 @@ export default function Home() {
                         {s.title}
                         {s.theme && s.theme !== "endgame" && <span className="text-muted"> · {themeLabel(s.theme)}</span>}
                       </span>
+                      {/* En móvil el estado va debajo del título para que el título no se parta palabra a palabra */}
+                      <span className="mt-0.5 block text-sm text-muted sm:hidden">{s.status ?? `${s.minutes} min`}</span>
                       {!isDone && (s.progress ?? 0) > 0 && (
                         <span className="mt-1 block h-1 overflow-hidden rounded-full bg-panel2">
                           <span className="block h-full" style={{ width: `${(s.progress ?? 0) * 100}%`, background: AREA_COLOR_VAR[s.area] }} />
                         </span>
                       )}
                     </span>
-                    <span className="shrink-0 text-right text-sm text-muted">{s.status ?? `${s.minutes} min`}</span>
+                    <span className="hidden max-w-[45%] shrink-0 text-right text-sm text-muted sm:block">{s.status ?? `${s.minutes} min`}</span>
                   </button>
                 </li>
               );
@@ -216,8 +218,10 @@ export default function Home() {
                     </span>
                   </Ring>
                   <span className={`text-xs font-semibold ${AREA_TEXT[a]}`}>{AREA_LABEL[a]}</span>
-                  <span className="text-[11px] text-muted">
-                    {formatDuration(overview?.week[a] ?? 0)} / {formatDuration(overview?.week_target[a] ?? 0)}
+                  {/* Hecho y objetivo en dos líneas: en una sola se partía por la mitad en móvil */}
+                  <span className="text-center text-[11px] leading-tight text-muted">
+                    <span className="block whitespace-nowrap">{formatDuration(overview?.week[a] ?? 0)}</span>
+                    <span className="block whitespace-nowrap">de {formatDuration(overview?.week_target[a] ?? 0)}</span>
                   </span>
                 </div>
               ))}
