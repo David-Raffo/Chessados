@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .coach import AREA_LABEL, today_plan, unreviewed_game, weak_themes
+from .coach import AREA_LABEL, fresh_themes, today_plan, unreviewed_game, weak_themes
 from .lessons import BY_ID, LESSONS
 from .models import (
     DailyChallenge,
@@ -165,6 +165,7 @@ def suggestions(db: Session, user: User, limit: int = 4) -> list[dict]:
     behind = sorted((a for a in target if target[a] - week.get(a, 0) > 15 * 60),
                     key=lambda a: -(target[a] - week.get(a, 0)))
     weak = weak_themes(db, user.id)
+    fresh = fresh_themes(db, user.id)
     has_repertoire = db.scalar(select(func.count()).select_from(RepertoireLine).where(RepertoireLine.user_id == user.id))
     woodpecker = db.scalar(select(func.count()).select_from(WoodpeckerSet).where(
         WoodpeckerSet.user_id == user.id, WoodpeckerSet.active.is_(True)))
@@ -179,6 +180,10 @@ def suggestions(db: Session, user: User, limit: int = 4) -> list[dict]:
                 out.append({"area": "tactics", "kind": "puzzles", "theme": t["theme"], "minutes": 15,
                             "title": "Puzzles de tu tema más flojo",
                             "reason": f"Es tu tema más flojo ({t['accuracy']}% de acierto). {why}"})
+            elif fresh:
+                out.append({"area": "tactics", "kind": "puzzles", "theme": fresh[0], "minutes": 15,
+                            "title": "Puzzles de un tema nuevo",
+                            "reason": f"Aún casi no has hecho puzzles de este tema. {why}"})
             elif woodpecker:
                 out.append({"area": "tactics", "kind": "woodpecker", "minutes": 15, "title": "Sigue tu ciclo Woodpecker", "reason": why})
             else:

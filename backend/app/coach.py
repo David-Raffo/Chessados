@@ -56,9 +56,50 @@ IGNORED_THEMES = {"short", "long", "veryLong", "oneMove", "middlegame", "opening
                   "masterVsMaster", "superGM", "crushing", "advantage", "equality", "mate"}
 
 
+WEAK_MIN_ATTEMPTS = 5
+WEAK_PRIOR = 6  # intentos «imaginarios» con tu acierto medio: frena conclusiones con pocos datos
+
+
 def weak_themes(db: Session, user_id: int) -> list[dict]:
-    stats = [t for t in theme_stats(db, user_id) if t["attempts"] >= 8 and t["theme"] not in IGNORED_THEMES]
-    return sorted(stats, key=lambda x: x["accuracy"])[:3]
+    """Temas en los que aciertas claramente menos que en el resto.
+
+    Se ordenan por un acierto suavizado hacia tu media: con pocos intentos pesa la media, con muchos
+    tu acierto real. Así un tema muy practicado (y por eso con muchos datos) no queda siempre el último
+    solo porque los demás no llegan al mínimo, y uno con 3 de 6 cuenta como más flojo que 26 de 37.
+    """
+    rows = [t for t in theme_stats(db, user_id) if t["theme"] not in IGNORED_THEMES]
+    n_all = sum(t["attempts"] for t in rows)
+    ok_all = sum(t["attempts"] * t["accuracy"] / 100 for t in rows)
+    if not n_all:
+        return []
+    mean = ok_all / n_all
+    out = []
+    for t in rows:
+        if t["attempts"] < WEAK_MIN_ATTEMPTS:
+            continue
+        smoothed = (t["attempts"] * t["accuracy"] / 100 + WEAK_PRIOR * mean) / (t["attempts"] + WEAK_PRIOR)
+        if smoothed < mean - 0.03:  # solo si de verdad estás por debajo de tu media
+            out.append({**t, "score": round(100 * smoothed)})
+    return sorted(out, key=lambda x: x["score"])[:3]
+
+
+# Temas tácticos que se pueden entrenar con filtro (como THEME_FILTERS del frontend, sin los de finales)
+TRAINABLE_THEMES = [
+    "fork", "pin", "skewer", "discoveredAttack", "hangingPiece", "sacrifice", "deflection", "attraction",
+    "mateIn1", "mateIn2", "mateIn3", "backRankMate", "promotion", "trappedPiece", "intermezzo", "quietMove",
+]
+FRESH_MAX_ATTEMPTS = 3  # con menos intentos que esto, el tema cuenta como «sin practicar»
+
+
+def fresh_themes(db: Session, user_id: int) -> list[str]:
+    """Temas entrenables que casi no has practicado nunca, de menos a más intentos.
+
+    A igualdad de intentos el orden cambia cada día, para no proponer siempre el mismo.
+    """
+    counts = {t["theme"]: t["attempts"] for t in theme_stats(db, user_id, days=3650)}
+    day = today().toordinal()
+    fresh = [t for t in TRAINABLE_THEMES if counts.get(t, 0) < FRESH_MAX_ATTEMPTS]
+    return sorted(fresh, key=lambda t: (counts.get(t, 0), (TRAINABLE_THEMES.index(t) + day) % len(TRAINABLE_THEMES)))
 
 
 def blunder_phases(db: Session, user_id: int, days: int = 30, not_before: date | None = None) -> dict[str, int]:
@@ -208,6 +249,8 @@ def today_plan(db: Session, user: User) -> dict:
             "text": f"{AREA_LABEL[a]} va {round(deficits[a])} puntos por debajo de su objetivo semanal: hoy empezamos por ahí.",
         })
 
+    fresh = fresh_themes(db, user.id)
+
     # Construcción de la sesión de hoy
     if endgame_due:
         endgame_block = {"area": "endgames", "kind": "endgame", "minutes": round(minutes * 0.2),
@@ -224,7 +267,8 @@ def today_plan(db: Session, user: User) -> dict:
             {"area": "tactics", "kind": "woodpecker", "minutes": round(minutes * 0.4), "title": "Ciclo Woodpecker"}
             if woodpecker else
             {"area": "tactics", "kind": "puzzles", "minutes": round(minutes * 0.4),
-             "title": "Puzzles tácticos", "theme": weak[0]["theme"] if weak else None}
+             # Primero lo que aún no has probado; si ya has tocado todo, tu tema más flojo
+             "title": "Puzzles tácticos", "theme": fresh[0] if fresh else (weak[0]["theme"] if weak else None)}
         ),
         # Jugar y revisar es una sola tarea: revisar sin haber jugado no tiene sentido
         "play": {"area": "play", "kind": "game", "minutes": 40, "title": "Juega una partida 15+10 y revísala",

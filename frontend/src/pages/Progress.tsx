@@ -203,7 +203,7 @@ export default function Progress() {
       <section className="card">
         <h2 className="mb-3 font-semibold">Tus temas más débiles</h2>
         {data.weak_themes.length === 0 ? (
-          <p className="text-sm text-muted">Aún no hay suficientes intentos (mínimo 8 por tema en 30 días).</p>
+          <p className="text-sm text-muted">Ningún tema por debajo de tu media (cuentan los temas con 5 intentos o más en 30 días).</p>
         ) : (
           <ul className="grid gap-2 sm:grid-cols-3">
             {data.weak_themes.map((t) => (
