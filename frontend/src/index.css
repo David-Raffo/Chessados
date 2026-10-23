@@ -68,8 +68,34 @@ cg-board square.move-dest {
 cg-board square.oc.move-dest {
   background: radial-gradient(transparent 0%, transparent 79%, rgba(20, 85, 0, 0.35) 80%);
 }
+/* Coordenadas dentro del tablero: letras abajo, números a la derecha. Las de chessground van
+   desplazadas hacia fuera (pensadas para el diseño de Lichess) y se salían en pantallas estrechas. */
 .cg-wrap coords {
   font-weight: 600;
+  font-size: clamp(9px, 2.6vw, 12px);
+}
+.cg-wrap coords.files {
+  left: 0;
+  bottom: 0;
+  height: auto;
+  text-align: left;
+}
+.cg-wrap coords.ranks {
+  left: auto;
+  right: 0;
+  top: 0;
+  width: auto;
+  text-align: right;
+}
+.cg-wrap coords coord {
+  flex: 1 1 0;
+}
+.cg-wrap coords.files coord {
+  padding: 0 0 1px 3px;
+}
+.cg-wrap coords.ranks coord {
+  transform: none;
+  padding: 1px 3px 0 0;
 }
 
 /* Variantes de color del tablero (Ajustes) */
