@@ -20,6 +20,8 @@ export interface BoardProps {
   check?: boolean;
   shapes?: DrawShape[];
   onMove?: (from: Key, to: Key) => void;
+  /** Casilla pulsada (también sin piezas movibles): para ejercicios de «señala la casilla» */
+  onSelect?: (key: Key) => void;
   className?: string;
 }
 
@@ -34,12 +36,15 @@ export default function Board({
   check,
   shapes,
   onMove,
+  onSelect,
   className = "",
 }: BoardProps) {
   const el = useRef<HTMLDivElement>(null);
   const cg = useRef<Api | null>(null);
   const onMoveRef = useRef(onMove);
   onMoveRef.current = onMove;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
 
   // Estado que el tablero debe mostrar según la app. Tras cada jugada se vuelve a aplicar: si la
   // jugada se ha rechazado (fallo en un puzzle, jugada ilegal, promoción cancelada) la posición
@@ -61,6 +66,7 @@ export default function Board({
       animation: { enabled: true, duration: 200 },
       highlight: { lastMove: true, check: true },
       premovable: { enabled: false },
+      events: { select: (key) => onSelectRef.current?.(key) },
       // Pincel blanco para la jugada que se hizo en la partida (revisión); chessground lo añade a los suyos
       drawable: {
         enabled: true,

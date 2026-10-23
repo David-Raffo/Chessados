@@ -8,6 +8,7 @@ import More from "./pages/More";
 import Openings from "./pages/Openings";
 import Woodpecker from "./pages/Woodpecker";
 import Home from "./pages/Home";
+import Learn from "./pages/Learn";
 import Login from "./pages/Login";
 import Play from "./pages/Play";
 import Progress from "./pages/Progress";
@@ -43,6 +44,8 @@ export default function App() {
         <Route index element={<Home />} />
         <Route path="jugar" element={<Play />} />
         <Route path="puzzles" element={<Puzzles />} />
+        <Route path="aprender" element={<Learn />} />
+        <Route path="aprender/:id" element={<Learn />} />
         <Route path="contrarreloj" element={<Rush />} />
         <Route path="partidas" element={<Games />} />
         <Route path="revision/:id" element={<Review />} />

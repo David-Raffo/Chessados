@@ -6,6 +6,7 @@ export const MODULES = [
   { to: "/", label: "Inicio", icon: "M3 11l9-8 9 8v10a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1z" },
   { to: "/jugar", label: "Jugar", icon: "M9 3h6l-1 4h3l-2 5h-8L5 7h3zM6 14h12l1 4H5zM4 20h16v2H4z" },
   { to: "/puzzles", label: "Puzzles", icon: "M10 3a2 2 0 014 0v2h4a1 1 0 011 1v4h-2a2 2 0 000 4h2v4a1 1 0 01-1 1h-4v-2a2 2 0 00-4 0v2H6a1 1 0 01-1-1v-4h2a2 2 0 000-4H5V6a1 1 0 011-1h4z" },
+  { to: "/aprender", label: "Aprender", icon: "M12 3L1 9l11 6 9-4.9V17h2V9zM5 13.2v4L12 21l7-3.8v-4L12 17z" },
   { to: "/contrarreloj", label: "Contrarreloj", icon: "M12 22a9 9 0 110-18 9 9 0 010 18zm0-2a7 7 0 100-14 7 7 0 000 14zm1-11v4.6l3 1.8-1 1.6-4-2.4V9zM9 1h6v2H9z" },
   { to: "/finales", label: "Finales", icon: "M7 21h10v-2H7zm1-4h8l-1-6h2V9h-3.2A3 3 0 0012 4a3 3 0 00-1.8 5H7v2h2z" },
   { to: "/aperturas", label: "Aperturas", icon: "M4 5a2 2 0 012-2h5v18H6a2 2 0 01-2-2zm9-2h5a2 2 0 012 2v14a2 2 0 01-2 2h-5z" },

@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from .db import Base, engine
-from .routers import daily, endgames, games, maia, openings, puzzles, sessions, stats, users, woodpecker
+from .routers import daily, endgames, games, learn, maia, openings, puzzles, sessions, stats, users, woodpecker
 
 
 def migrate(conn) -> None:
@@ -66,5 +66,5 @@ def health():
     return {"ok": True}
 
 
-for module in (users, sessions, puzzles, games, stats, maia, endgames, openings, woodpecker, daily):
+for module in (users, sessions, puzzles, games, stats, maia, endgames, openings, woodpecker, daily, learn):
     app.include_router(module.router)
