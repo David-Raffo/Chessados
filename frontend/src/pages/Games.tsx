@@ -121,7 +121,7 @@ export default function Games() {
               <Link to={`/revision/${g.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-panel2">
                 <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${RESULT_STYLE[g.user_result ?? ""] ?? "bg-line"}`} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold">
+                  <div className="line-clamp-2 font-semibold leading-snug">
                     {RESULT_TEXT[g.user_result ?? ""] ?? g.result} contra {opponentName(g)}
                     {g.opponent_elo && !["stockfish", "maia"].includes(g.opponent) ? ` (${g.opponent_elo})` : ""}
                   </div>

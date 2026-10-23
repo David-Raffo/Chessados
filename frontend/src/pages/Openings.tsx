@@ -405,7 +405,7 @@ function Deviations({ onOpen }: { onOpen: (color: Color, path: string[]) => void
           return (
             <li key={r.game_id} className="flex flex-wrap items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold">{r.opening?.name ?? "Apertura desconocida"}</div>
+                <div className="line-clamp-2 font-semibold leading-snug">{r.opening?.name ?? "Apertura desconocida"}</div>
                 <div className="text-sm text-muted">
                   {!d && "Sin repertorio para esta partida o la seguiste entera."}
                   {d?.type === "you" && (

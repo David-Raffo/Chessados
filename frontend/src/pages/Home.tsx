@@ -201,7 +201,7 @@ export default function Home() {
               <h2 className="font-bold">Esta semana</h2>
               <span className="text-sm text-muted">objetivo {user?.weekly_hours} h</span>
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-x-2 gap-y-4 min-[400px]:grid-cols-4">
               {(["tactics", "play", "endgames", "openings"] as Area[]).map((a) => (
                 <div key={a} className="flex flex-col items-center gap-1">
                   <Ring

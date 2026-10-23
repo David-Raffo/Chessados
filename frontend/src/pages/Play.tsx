@@ -249,7 +249,9 @@ export default function Play() {
               className={`rounded-xl border p-3 text-left ${setup.ladder ? "border-play bg-play/10" : "border-line"}`}
               onClick={() => setSetup({ ...setup, ladder: true })}
             >
-              <div className="font-semibold">Escalera · {lock?.ladder_elo ?? user?.ladder_elo}</div>
+              <div className="font-semibold">
+                Escalera <span className="whitespace-nowrap">· {lock?.ladder_elo ?? user?.ladder_elo}</span>
+              </div>
               <div className="text-xs text-muted">Ganas: +50. Pierdes: −25.</div>
             </button>
             <button
@@ -303,7 +305,7 @@ export default function Play() {
 
         <div>
           <label className="label">Ritmo</label>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {TIME_CONTROLS.map((t) => (
               <button
                 key={t.id}

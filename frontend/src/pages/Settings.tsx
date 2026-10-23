@@ -68,9 +68,14 @@ export default function Settings() {
           </label>
           <div className="space-y-3">
             {AREAS.map((a) => (
-              <div key={a} className="grid grid-cols-[7rem_1fr_3.5rem_5.5rem] items-center gap-3 text-sm">
+              // En móvil la barra va en su propia fila: con las cuatro columnas en una no cabía
+              <div
+                key={a}
+                className="grid grid-cols-[1fr_3.5rem_5.5rem] items-center gap-x-3 gap-y-1 text-sm sm:grid-cols-[7rem_1fr_3.5rem_5.5rem]"
+              >
                 <span className={`font-semibold ${AREA_TEXT[a]}`}>{AREA_LABEL[a]}</span>
                 <input
+                  className="order-last col-span-3 sm:order-none sm:col-span-1"
                   type="range"
                   min={0}
                   max={80}
@@ -172,7 +177,7 @@ export default function Settings() {
         </label>
         <div>
           <span className="label">Tablero</span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {(
               [
                 ["brown", "Madera", "#b58863", "#f0d9b5"],
