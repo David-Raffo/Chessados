@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Chessground } from "@lichess-org/chessground";
 import type { Api } from "@lichess-org/chessground/api";
-import type { DrawShape } from "@lichess-org/chessground/draw";
+import type { DrawBrushes, DrawShape } from "@lichess-org/chessground/draw";
 import type { Key } from "@lichess-org/chessground/types";
 import type { Chess, Square } from "chess.js";
 import { prefs } from "../lib/prefs";
@@ -61,7 +61,11 @@ export default function Board({
       animation: { enabled: true, duration: 200 },
       highlight: { lastMove: true, check: true },
       premovable: { enabled: false },
-      drawable: { enabled: true },
+      // Pincel blanco para la jugada que se hizo en la partida (revisión); chessground lo añade a los suyos
+      drawable: {
+        enabled: true,
+        brushes: { white: { key: "w", color: "#ffffff", opacity: 0.8, lineWidth: 10 } } as unknown as DrawBrushes,
+      },
       movable: {
         free: false,
         showDests: true,

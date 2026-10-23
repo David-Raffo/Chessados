@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import confetti from "canvas-confetti";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import Board from "../components/Board";
@@ -24,7 +25,9 @@ const MAX_STRIKES = 3;
 
 export default function Rush() {
   const [history, setHistory] = useState<History | null>(null);
-  const [minutes, setMinutes] = useState(3);
+  const [params] = useSearchParams();
+  // Desde el plan llega con los minutos del paso (?min=5)
+  const [minutes, setMinutes] = useState(params.get("min") === "5" ? 5 : 3);
   const [run, setRun] = useState<{ puzzles: Puzzle[]; key: number } | null>(null);
   const [final, setFinal] = useState<{ score: number; best: number; is_record: boolean; rating: number } | null>(null);
   const [error, setError] = useState("");

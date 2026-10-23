@@ -19,11 +19,12 @@ export function stepLink(s: PlanStep): string {
       return `/puzzles${qs ? `?${qs}` : ""}`;
     }
     case "game":
-      return "/jugar?tc=15%2B10";
+      // Ya jugada y sin revisar: el paso lleva a su revisión
+      return s.game_id && !s.done ? `/revision/${s.game_id}` : "/jugar?tc=15%2B10";
     case "review":
       return s.game_id ? `/revision/${s.game_id}` : "/partidas";
     case "rush":
-      return "/contrarreloj";
+      return `/contrarreloj?min=${s.minutes === 5 ? 5 : 3}`;
     case "endgame":
       return s.lesson_id ? `/finales/${s.lesson_id}` : "/finales";
     case "openings":

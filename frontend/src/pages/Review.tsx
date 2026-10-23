@@ -216,12 +216,18 @@ export default function Review() {
       const [orig, dest] = uciToKeys(liveNow.pv[0]);
       return [{ orig, dest, brush: "blue" }];
     }
-    // La mejor jugada de la posición que se ve: es la que el análisis calculó para la jugada siguiente
-    const here = analysis[ply];
-    if (!showEngine || !here?.best_uci) return [];
-    const [orig, dest] = uciToKeys(here.best_uci);
-    return [{ orig, dest, brush: "green" }];
-  }, [analysis, ply, showEngine, inVariation, liveNow]);
+    // Como en chess.com: de la jugada que acaba de hacerse, en blanco la jugada y en verde la que había
+    // que hacer en su lugar (lo mismo que cuenta el recuadro). Si fue la mejor, solo la verde.
+    if (!showEngine || !current?.best_uci) return [];
+    const [orig, dest] = uciToKeys(current.best_uci);
+    const out: DrawShape[] = [];
+    if (current.uci.slice(0, 4) !== current.best_uci.slice(0, 4)) {
+      const [o, d] = uciToKeys(current.uci);
+      out.push({ orig: o, dest: d, brush: "white" });
+    }
+    out.push({ orig, dest, brush: "green" });
+    return out;
+  }, [current, showEngine, inVariation, liveNow]);
 
   const chartData = useMemo(
     () =>
@@ -476,8 +482,8 @@ export default function Review() {
                   </div>
                 ) : (
                   <p className="text-sm text-muted">
-                    Usa ← → o pulsa una jugada. La flecha verde marca la mejor jugada en la posición que ves. Mueve las piezas para
-                    probar otros caminos: Stockfish los evalúa al momento.
+                    Usa ← → o pulsa una jugada. De cada jugada, la flecha blanca marca la que se hizo y la verde la que había que
+                    hacer. Mueve las piezas para probar otros caminos: Stockfish los evalúa al momento.
                   </p>
                 )}
               </>

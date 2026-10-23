@@ -58,9 +58,18 @@ def _progress(db: Session, user: User, step: dict, plan: DailyPlan) -> tuple[flo
         return min(1.0, secs / target), f"{secs // 60} de {step['minutes']} min", {"seconds": secs, "target_seconds": target}
 
     if kind == "game":
-        played = db.scalar(select(func.count()).select_from(Game).where(
-            Game.user_id == user.id, Game.source == "app", Game.created_at >= plan.created_at))
-        return (1.0, "Jugada", {}) if played else (0.0, "Sin jugar", {})
+        games = db.scalars(select(Game).where(
+            Game.user_id == user.id, Game.source == "app", Game.created_at >= plan.created_at
+        ).order_by(Game.created_at.desc())).all()
+        if not games:
+            return 0.0, "Sin jugar", {}
+        if not step.get("with_review"):
+            return 1.0, "Jugada", {}
+        # Jugada: falta revisarla (el paso lleva a su revisión)
+        pending = [g for g in games if not g.reviewed]
+        if pending:
+            return 0.5, "Falta revisarla", {"game_id": pending[0].id}
+        return 1.0, "Jugada y revisada", {}
 
     if kind == "review":
         if step.get("game_id"):
@@ -76,7 +85,7 @@ def _progress(db: Session, user: User, step: dict, plan: DailyPlan) -> tuple[flo
 
     if kind == "rush":
         runs = db.scalar(select(func.count()).select_from(RushRun).where(
-            RushRun.user_id == user.id, RushRun.created_at >= since))
+            RushRun.user_id == user.id, RushRun.created_at >= since, RushRun.minutes == step["minutes"]))
         return (1.0, "Hecho", {}) if runs else (0.0, "Sin hacer", {})
 
     if kind == "daily":

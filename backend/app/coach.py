@@ -226,7 +226,9 @@ def today_plan(db: Session, user: User) -> dict:
             {"area": "tactics", "kind": "puzzles", "minutes": round(minutes * 0.4),
              "title": "Puzzles tácticos", "theme": weak[0]["theme"] if weak else None}
         ),
-        "play": {"area": "play", "kind": "game", "minutes": 30, "title": "Partida 15+10"},
+        # Jugar y revisar es una sola tarea: revisar sin haber jugado no tiene sentido
+        "play": {"area": "play", "kind": "game", "minutes": 40, "title": "Juega una partida 15+10 y revísala",
+                 "with_review": True},
         "endgames": endgame_block,
         "openings": {"area": "openings", "kind": "openings", "minutes": 10,
                      "title": f"Repaso del repertorio ({opening_due} pendientes)" if opening_due else "Amplía tu repertorio"},
@@ -240,15 +242,12 @@ def today_plan(db: Session, user: User) -> dict:
                            "game_id": pending.id})
     for a in order:
         candidates.append(blocks[a])
-        if a == "play" and not pending:
-            candidates.append({"area": "play", "kind": "review", "minutes": 10, "title": "Revisa la partida de hoy"})
     candidates.append({"area": "tactics", "kind": "rush", "minutes": 5, "title": "Contrarreloj de 5 minutos"})
 
     # Se llenan los minutos del día en orden de prioridad; siempre al menos dos bloques
     steps, used = [], 0
     for step in candidates:
-        follows_game = step["kind"] == "review" and steps and steps[-1]["kind"] == "game"
-        if len(steps) < 3 or follows_game or used + step["minutes"] <= minutes:
+        if len(steps) < 3 or used + step["minutes"] <= minutes:
             steps.append(step)
             used += step["minutes"]
 
