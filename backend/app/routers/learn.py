@@ -14,17 +14,10 @@ from ..models import LessonProgress, User
 router = APIRouter(prefix="/api/learn", tags=["aprender"])
 
 
-def stars(mistakes: int | None) -> int:
-    """3 estrellas sin fallos, 2 con uno o dos, 1 con más."""
-    if mistakes is None:
-        return 0
-    return 3 if mistakes == 0 else 2 if mistakes <= 2 else 1
-
-
 def progress_out(p: LessonProgress | None) -> dict:
     if p is None:
-        return {"step": 0, "completed": False, "stars": 0}
-    return {"step": p.step, "completed": p.completed_at is not None, "stars": stars(p.best_mistakes)}
+        return {"step": 0, "completed": False}
+    return {"step": p.step, "completed": p.completed_at is not None}
 
 
 @router.get("")

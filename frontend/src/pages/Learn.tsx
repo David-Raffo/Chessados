@@ -57,7 +57,6 @@ type Step = ExplainStep | SelectStep | MoveStep | ChoiceStep | PracticeStep;
 interface LessonProgress {
   step: number;
   completed: boolean;
-  stars: number;
 }
 interface Lesson {
   id: string;
@@ -87,18 +86,6 @@ function stepShapes(step: StepBase): DrawShape[] {
   for (const [orig, dest, brush] of step.arrows ?? []) out.push({ orig: orig as Key, dest: dest as Key, brush });
   for (const [sq, brush] of Object.entries(step.squares ?? {})) out.push({ orig: sq as Key, brush });
   return out;
-}
-
-function Stars({ n, className = "" }: { n: number; className?: string }) {
-  return (
-    <span className={`whitespace-nowrap ${className}`} aria-label={`${n} de 3 estrellas`}>
-      {[1, 2, 3].map((i) => (
-        <span key={i} className={i <= n ? "text-tactics" : "text-line"}>
-          ★
-        </span>
-      ))}
-    </span>
-  );
 }
 
 // --- Página -------------------------------------------------------------------
@@ -133,7 +120,11 @@ function Courses() {
                 <Link key={i} to={`/aprender/${l.id}`} className="card flex flex-col gap-1 transition hover:bg-panel2">
                   <div className="flex items-start justify-between gap-2">
                     <span className="font-semibold">{l.title}</span>
-                    {l.progress?.completed ? <Stars n={l.progress.stars} /> : <span className="text-xs text-muted">{l.minutes} min</span>}
+                    {l.progress?.completed ? (
+                      <span className="shrink-0 rounded-full bg-good/15 px-2 py-0.5 text-xs font-semibold text-good">✓ Hecha</span>
+                    ) : (
+                      <span className="shrink-0 text-xs text-muted">{l.minutes} min</span>
+                    )}
                   </div>
                   <span className="text-sm text-muted">{l.summary}</span>
                   {!l.progress?.completed && (l.progress?.step ?? 0) > 0 && <span className="text-xs text-tactics">A medias: sigue donde lo dejaste</span>}
@@ -178,7 +169,7 @@ function LessonPlayer({ id }: { id: string }) {
     if (index + 1 >= lesson.steps.length) {
       api<LessonProgress>(`/learn/${id}/progress`, { body: { step: lesson.steps.length, completed: true, mistakes } })
         .then(setResult)
-        .catch(() => setResult({ step: 0, completed: true, stars: 0 }));
+        .catch(() => setResult({ step: 0, completed: true }));
       confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 }, disableForReducedMotion: true });
       return;
     }
@@ -220,11 +211,11 @@ function LessonPlayer({ id }: { id: string }) {
       <div className="mx-auto max-w-xl space-y-4">
         {header}
         <div className="card space-y-3 text-center">
-          <p className="text-2xl font-extrabold">¡Lección completada!</p>
-          <Stars n={result.stars} className="text-4xl" />
-          <p className="text-sm text-muted">
-            {mistakes === 0 ? "Sin un solo fallo." : `${mistakes} fallo${mistakes > 1 ? "s" : ""} en los ejercicios.`} Tres estrellas si la haces sin fallos.
+          <p className="text-4xl text-good" aria-hidden>
+            ✓
           </p>
+          <p className="text-2xl font-extrabold">¡Lección completada!</p>
+          <p className="text-sm text-muted">Queda marcada como hecha. Puedes repetirla cuando quieras.</p>
           <div className="flex flex-col gap-2 sm:flex-row">
             {lesson.theme && (
               <Link className="btn-primary flex-1" to={`/puzzles?theme=${lesson.theme}`}>
