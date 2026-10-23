@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Chess } from "chess.js";
 import confetti from "canvas-confetti";
 import Board, { toDests, uciToKeys, type Color, type DrawShape, type Key } from "../components/Board";
 import Promotion from "../components/Promotion";
 import { api } from "../lib/api";
+import { Engine, EngineClosedError } from "../lib/engine";
 import { CLASS_LABEL } from "../lib/labels";
 import { sound } from "../lib/sound";
 import type { Puzzle } from "../lib/types";
@@ -141,6 +142,9 @@ function DailyPuzzle({ puzzle, done, onDone }: { puzzle: Puzzle; done?: { succes
 }
 
 const OWN_TRIES = 3;
+// Una jugada distinta de la del análisis vale si pierde como mucho medio peón respecto a la mejor
+const OWN_TOLERANCE = 50;
+const OWN_DEPTH = 14;
 
 function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean }; onDone: (ok: boolean) => void }) {
   const chess = useMemo(() => new Chess(own.fen), [own.fen]);
@@ -150,7 +154,27 @@ function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean };
   const [shake, setShake] = useState(false);
   const [note, setNote] = useState("");
   const [shapes, setShapes] = useState<DrawShape[]>([]);
+  const [checking, setChecking] = useState(false);
+  const [alt, setAlt] = useState<{ san: string; loss: number } | null>(null); // jugada buena distinta de la mejor
+  const engine = useRef<Engine | null>(null);
+  const bestEval = useRef<Promise<number> | null>(null);
   const left = OWN_TRIES - tried.length;
+  const sign = own.user_color === "white" ? 1 : -1;
+
+  // Motor del navegador para valorar jugadas distintas de la del análisis; la mejor se evalúa ya
+  useEffect(() => {
+    const e = new Engine();
+    engine.current = e;
+    const c = new Chess(own.fen);
+    const [from, to] = uciToKeys(own.best_uci);
+    c.move({ from, to, promotion: own.best_uci[4] });
+    bestEval.current = e.evaluate(c.fen(), OWN_DEPTH).then((r) => r.cp * sign);
+    bestEval.current.catch(() => undefined);
+    return () => {
+      e.terminate();
+      engine.current = null;
+    };
+  }, [own.fen, own.best_uci, sign]);
 
   function finish(ok: boolean) {
     setResult(ok);
@@ -162,8 +186,27 @@ function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean };
     if (!done) onDone(ok);
   }
 
-  function onMove(from: Key, to: Key) {
-    if (result !== null) return;
+  function succeed(fenAfter: string) {
+    setFen(fenAfter);
+    sound.good();
+    confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 }, disableForReducedMotion: true });
+    finish(true);
+  }
+
+  function fail(san: string) {
+    // La pieza vuelve a su sitio y, si quedan intentos, se puede probar otra jugada
+    setFen(own.fen);
+    sound.bad();
+    setShake(true);
+    window.setTimeout(() => setShake(false), 400);
+    const next = [...tried, san];
+    setTried(next);
+    setNote(san === own.played_san ? `${san} es lo que jugaste en la partida: precisamente el error.` : `${san} no es suficiente.`);
+    if (next.length >= OWN_TRIES) finish(false);
+  }
+
+  async function onMove(from: Key, to: Key) {
+    if (result !== null || checking) return;
     const c = new Chess(own.fen);
     let san: string;
     try {
@@ -172,25 +215,40 @@ function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean };
       return;
     }
     if (`${from}${to}` === own.best_uci.slice(0, 4)) {
-      setFen(c.fen());
-      sound.good();
-      confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 }, disableForReducedMotion: true });
-      finish(true);
+      succeed(c.fen());
       return;
     }
-    // Fallo: la pieza vuelve a su sitio y, si quedan intentos, se puede probar otra jugada
-    setFen(own.fen);
-    sound.bad();
-    setShake(true);
-    window.setTimeout(() => setShake(false), 400);
     if (tried.includes(san)) {
+      setFen(own.fen);
       setNote(`Ya probaste ${san}. Busca otra jugada.`);
       return;
     }
-    const next = [...tried, san];
-    setTried(next);
-    setNote(san === own.played_san ? `${san} es lo que jugaste en la partida: precisamente el error.` : `${san} no es la mejor.`);
-    if (next.length >= OWN_TRIES) finish(false);
+    if (san === own.played_san) {
+      fail(san);
+      return;
+    }
+    // Otra jugada: Stockfish la compara con la mejor
+    setFen(c.fen());
+    setNote("");
+    setChecking(true);
+    try {
+      const e = engine.current;
+      if (!e || !bestEval.current) throw new EngineClosedError();
+      const [best, mine] = await Promise.all([bestEval.current, e.evaluate(c.fen(), OWN_DEPTH).then((r) => r.cp * sign)]);
+      const loss = Math.max(0, best - mine);
+      if (loss <= OWN_TOLERANCE) {
+        setAlt({ san, loss });
+        const [orig, dest] = uciToKeys(own.best_uci);
+        setShapes([{ orig, dest, brush: "green" }]);
+        succeed(c.fen());
+      } else fail(san);
+    } catch (err) {
+      if (err instanceof EngineClosedError) return;
+      // Sin motor no se puede valorar: se mantiene el criterio estricto
+      fail(san);
+    } finally {
+      setChecking(false);
+    }
   }
 
   return (
@@ -199,7 +257,7 @@ function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean };
         <Board
           fen={fen}
           orientation={own.user_color}
-          movable={result === null ? own.user_color : undefined}
+          movable={result === null && !checking ? own.user_color : undefined}
           dests={toDests(chess)}
           shapes={shapes}
           onMove={onMove}
@@ -208,7 +266,7 @@ function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean };
       <aside className="card h-fit space-y-3">
         <h2 className="font-bold">Encuentra la mejor jugada</h2>
         <p className="text-sm text-muted">
-          En esta posición de una de tus partidas jugaste {own.played_san} ({CLASS_LABEL[own.classification]?.toLowerCase()}). ¿Qué era mejor?
+          En esta posición de una de tus partidas jugaste {own.played_san} ({CLASS_LABEL[own.classification]?.toLowerCase()}). ¿Qué era mejor? Vale cualquier jugada casi tan buena como la del motor.
         </p>
         {result === null && (
           <>
@@ -221,15 +279,22 @@ function OwnGame({ own, done, onDone }: { own: Own; done?: { success: boolean };
                 · te queda{left === 1 ? "" : "n"} {left}
               </span>
             </div>
+            {checking && <p className="text-sm text-muted">Comprobando tu jugada con Stockfish…</p>}
             {note && <p className="text-sm font-semibold text-bad">{note}</p>}
             <button className="btn-ghost w-full" onClick={() => finish(false)}>
               Ver solución
             </button>
           </>
         )}
-        {result === true && (
+        {result === true && !alt && (
           <p className="font-semibold text-good">
             ¡Exacto! {own.best_san} era lo mejor{tried.length ? ` (al ${tried.length + 1}.º intento)` : ""}.
+          </p>
+        )}
+        {result === true && alt && (
+          <p className="font-semibold text-good">
+            ¡Bien! {alt.san} también vale{alt.loss >= 10 ? ` (pierde ${(alt.loss / 100).toFixed(1).replace(".", ",")} respecto a la mejor)` : ""}
+            {tried.length ? `, al ${tried.length + 1}.º intento` : ""}. La del análisis era {own.best_san} (flecha verde).
           </p>
         )}
         {result === false && <p className="font-semibold text-bad">Lo mejor era {own.best_san} (flecha verde).</p>}
