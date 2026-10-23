@@ -89,9 +89,37 @@ export default function Puzzles() {
     setParams(q);
   }
 
+  const title = area === "endgames" ? "Finales" : review ? "Repaso de fallos" : "Puzzles";
+  const score = (
+    <span className="text-sm text-muted">
+      <span className="text-good">{session.solved} ✓</span> · <span className="text-bad">{session.failed} ✗</span>
+    </span>
+  );
+  const elo = (
+    <span className="text-lg font-extrabold">
+      {rating ?? "–"}
+      {lastDelta !== null && (
+        <span className={`ml-1.5 text-sm ${lastDelta > 0 ? "text-good" : lastDelta < 0 ? "text-bad" : "text-muted"}`}>
+          {lastDelta > 0 ? `+${lastDelta}` : lastDelta === 0 ? "±0" : lastDelta}
+        </span>
+      )}
+    </span>
+  );
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-6">
+      {/* Móvil: título, marcador y ELO encima del tablero; así el tablero queda centrado y los botones debajo */}
+      <header className="flex items-center justify-between gap-3 lg:hidden">
+        <div>
+          <h1 className="text-xl font-extrabold">{title}</h1>
+          {score}
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-muted">ELO de {area === "endgames" ? "finales" : "táctica"}</div>
+          {elo}
+        </div>
+      </header>
+
       <div className="mx-auto w-full max-w-[min(100%,calc(100vh-8rem))]">
         <div
           className={`relative rounded-md ${p.flash === "bad" ? "flash-bad animate-shake" : ""} ${
@@ -122,27 +150,16 @@ export default function Puzzles() {
         </div>
       </div>
 
-      <aside className="space-y-4">
-        <div className="card space-y-3">
-          <div className="flex items-center justify-between">
-            <h1 className="text-xl font-extrabold">
-              {area === "endgames" ? "Finales" : review ? "Repaso de fallos" : "Puzzles"}
-            </h1>
-            <span className="text-sm text-muted">
-              <span className="text-good">{session.solved} ✓</span> · <span className="text-bad">{session.failed} ✗</span>
-            </span>
+      <aside className="space-y-4" data-panel="puzzle">
+        <div className="card flex flex-col gap-3">
+          <div className="hidden items-center justify-between lg:flex">
+            <h2 className="text-xl font-extrabold">{title}</h2>
+            {score}
           </div>
 
-          <div className="flex items-center justify-between rounded-xl border border-line px-3 py-2 text-sm">
+          <div className="hidden items-center justify-between rounded-xl border border-line px-3 py-2 text-sm lg:flex">
             <span className="text-muted">Tu ELO de {area === "endgames" ? "finales" : "táctica"}</span>
-            <span className="text-lg font-extrabold">
-              {rating ?? "–"}
-              {lastDelta !== null && (
-                <span className={`ml-1.5 text-sm ${lastDelta > 0 ? "text-good" : lastDelta < 0 ? "text-bad" : "text-muted"}`}>
-                  {lastDelta > 0 ? `+${lastDelta}` : lastDelta === 0 ? "±0" : lastDelta}
-                </span>
-              )}
-            </span>
+            {elo}
           </div>
 
           {error && <p className="text-sm text-bad">{error}</p>}
@@ -160,8 +177,13 @@ export default function Puzzles() {
               >
                 {p.status === "intro" && "Mira la jugada del rival…"}
                 {p.status === "play" &&
-                  (p.mistake ? (
+                  (p.wrong ? (
                     "No es eso. Sigue intentándolo."
+                  ) : showHint ? (
+                    <>
+                      Mueve la pieza marcada
+                      <span className="block text-sm font-normal text-muted">Con pista, el puzzle cuenta como fallado</span>
+                    </>
                   ) : (
                     <>
                       Juegan las {p.color === "white" ? "blancas" : "negras"}
@@ -173,7 +195,7 @@ export default function Puzzles() {
                 {p.status === "solved" && "¡Correcto!"}
                 {p.status === "failed" &&
                   (p.recovered
-                    ? "¡Bien, ahora sí! Cuenta como fallado y volverá a tu cola de repaso."
+                    ? `${showHint && !p.wrong ? "¡Resuelto con pista!" : "¡Bien, ahora sí!"} Cuenta como fallado y volverá a tu cola de repaso.`
                     : "Puzzle fallado. Volverá a tu cola de repaso.")}
               </div>
 
@@ -217,7 +239,7 @@ export default function Puzzles() {
                     disabled={p.status !== "play"}
                     onClick={() => {
                       setShowHint(true);
-                      if (!p.mistake) p.fail();
+                      p.takeHint();
                     }}
                   >
                     Pista

@@ -18,6 +18,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
   const [status, setStatus] = useState<PuzzleStatus>("intro");
   const [mistake, setMistake] = useState(false); // ya ha fallado una vez (el puzzle cuenta como fallado)
   const [recovered, setRecovered] = useState(false); // lo terminó bien tras fallar o reintentar
+  const [wrong, setWrong] = useState(false); // ha hecho alguna jugada equivocada (no solo pedir pista)
   const [flash, setFlash] = useState<"good" | "bad" | null>(null);
   const [promo, setPromo] = useState<{ from: Key; to: Key } | null>(null);
   const startedAt = useRef(0);
@@ -66,6 +67,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     setStatus("intro");
     setMistake(false);
     setRecovered(false);
+    setWrong(false);
     setFlash(null);
     reported.current = false;
     later(() => {
@@ -79,6 +81,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
 
   const fail = useCallback(() => {
     setMistake(true);
+    setWrong(true);
     setFlash("bad");
     sound.bad();
     report(false);
@@ -135,6 +138,13 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     [apply, fail, idx, later, mistake, puzzle, report, status],
   );
 
+  /** Pista: cuenta como fallo, pero sin el aviso de jugada equivocada. */
+  const takeHint = useCallback(() => {
+    if (!puzzle || status !== "play") return;
+    setMistake(true);
+    report(false);
+  }, [puzzle, report, status]);
+
   /** Muestra la solución jugada a jugada (cuenta como fallo). */
   const showSolution = useCallback(() => {
     if (!puzzle || status !== "play") return;
@@ -155,6 +165,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     setIdx(1);
     setMistake(true);
     setRecovered(false);
+    setWrong(false);
     setFlash(null);
     setStatus("play");
   }, [apply, cancelTimers, puzzle]);
@@ -173,6 +184,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     status,
     mistake,
     recovered,
+    wrong,
     flash,
     promo,
     setPromo,
@@ -181,6 +193,7 @@ export function usePuzzle(puzzle: Puzzle | null, opts: { onDone?: (solved: boole
     check: chess.current.inCheck(),
     userMove,
     fail,
+    takeHint,
     showSolution,
     retry,
     turn: (chess.current.turn() === "w" ? "white" : "black") as Color,
