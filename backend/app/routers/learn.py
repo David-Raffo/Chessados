@@ -26,7 +26,7 @@ def courses(user: User = Depends(current_user), db: Session = Depends(get_db)):
     out = []
     for c in COURSES:
         lessons = []
-        for lid, title in c["outline"]:
+        for lid, title, _theme in c["outline"]:
             lesson = BY_ID.get(lid) if lid else None
             lessons.append({
                 "id": lid, "title": lesson["title"] if lesson else title, "available": lesson is not None,

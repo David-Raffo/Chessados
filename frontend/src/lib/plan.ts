@@ -33,6 +33,8 @@ export function stepLink(s: PlanStep): string {
       return "/woodpecker";
     case "daily":
       return "/retos";
+    case "lesson":
+      return `/aprender/${s.lesson_id}`;
   }
 }
 

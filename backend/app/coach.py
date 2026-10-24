@@ -5,12 +5,14 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from . import learn
 from .lessons import LESSONS
 from .models import (
     DailyChallenge,
     EndgameAttempt,
     Game,
     GameAnalysis,
+    LessonProgress,
     Puzzle,
     PuzzleAttempt,
     Rating,
@@ -100,6 +102,41 @@ def fresh_themes(db: Session, user_id: int) -> list[str]:
     day = today().toordinal()
     fresh = [t for t in TRAINABLE_THEMES if counts.get(t, 0) < FRESH_MAX_ATTEMPTS]
     return sorted(fresh, key=lambda t: (counts.get(t, 0), (TRAINABLE_THEMES.index(t) + day) % len(TRAINABLE_THEMES)))
+
+
+# Área en la que cuenta el tiempo de cada curso de Aprender
+LEARN_AREA = {"mates": "tactics", "tactica": "tactics", "estrategia": "play", "finales": "endgames", "aperturas": "openings"}
+
+
+def completed_lessons(db: Session, user_id: int) -> set[str]:
+    return set(db.scalars(select(LessonProgress.lesson_id).where(
+        LessonProgress.user_id == user_id, LessonProgress.completed_at.isnot(None))))
+
+
+def lesson_for_themes(db: Session, user_id: int, themes: list[str]) -> dict | None:
+    """Primera lección de Aprender, sin completar, de alguno de estos temas (en ese orden)."""
+    done = completed_lessons(db, user_id)
+    by_theme = {t: lid for c in learn.COURSES for lid, _, t in c["outline"] if t and lid in learn.BY_ID}
+    for t in themes:
+        lid = by_theme.get(t)
+        if lid and lid not in done:
+            return learn.BY_ID[lid]
+    return None
+
+
+def next_learn_lesson(db: Session, user_id: int) -> dict | None:
+    """Siguiente lección sin completar, en el orden del temario."""
+    done = completed_lessons(db, user_id)
+    return next((learn.BY_ID[lid] for c in learn.COURSES for lid, _, _ in c["outline"]
+                 if lid in learn.BY_ID and lid not in done), None)
+
+
+def lesson_step(lesson: dict, reason: str | None = None) -> dict:
+    step = {"area": LEARN_AREA[lesson["course"]], "kind": "lesson", "lesson_id": lesson["id"],
+            "minutes": lesson["minutes"], "title": f"Lección: {lesson['title']}"}
+    if reason:
+        step["reason"] = reason
+    return step
 
 
 def blunder_phases(db: Session, user_id: int, days: int = 30, not_before: date | None = None) -> dict[str, int]:
@@ -250,6 +287,13 @@ def today_plan(db: Session, user: User) -> dict:
         })
 
     fresh = fresh_themes(db, user.id)
+    tactics_theme = fresh[0] if fresh else (weak[0]["theme"] if weak else None)
+    # Si fallas un tema (o vas a empezar uno nuevo) que tiene lección en Aprender y no la has hecho,
+    # la lección va antes que sus puzzles: primero entender el patrón, después practicarlo.
+    # Solo hay un bloque de táctica, así que como mucho es una lección al día.
+    themed_lesson = None if woodpecker else lesson_for_themes(db, user.id, [t["theme"] for t in weak] + fresh)
+    if themed_lesson:
+        tactics_theme = themed_lesson["theme"]
 
     # Construcción de la sesión de hoy
     if endgame_due:
@@ -266,9 +310,10 @@ def today_plan(db: Session, user: User) -> dict:
         "tactics": (
             {"area": "tactics", "kind": "woodpecker", "minutes": round(minutes * 0.4), "title": "Ciclo Woodpecker"}
             if woodpecker else
-            {"area": "tactics", "kind": "puzzles", "minutes": round(minutes * 0.4),
+            {"area": "tactics", "kind": "puzzles",
+             "minutes": max(10, round(minutes * 0.4) - (themed_lesson["minutes"] if themed_lesson else 0)),
              # Primero lo que aún no has probado; si ya has tocado todo, tu tema más flojo
-             "title": "Puzzles tácticos", "theme": fresh[0] if fresh else (weak[0]["theme"] if weak else None)}
+             "title": "Puzzles tácticos", "theme": tactics_theme}
         ),
         # Jugar y revisar es una sola tarea: revisar sin haber jugado no tiene sentido
         "play": {"area": "play", "kind": "game", "minutes": 40, "title": "Juega una partida 15+10 y revísala",
@@ -285,6 +330,8 @@ def today_plan(db: Session, user: User) -> dict:
         candidates.append({"area": "play", "kind": "review", "minutes": 10, "title": "Revisa tu última partida",
                            "game_id": pending.id})
     for a in order:
+        if a == "tactics" and themed_lesson:
+            candidates.append(lesson_step(themed_lesson))
         candidates.append(blocks[a])
     candidates.append({"area": "tactics", "kind": "rush", "minutes": 5, "title": "Contrarreloj de 5 minutos"})
 

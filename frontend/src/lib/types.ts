@@ -63,7 +63,7 @@ export interface Game {
 
 export interface PlanStep {
   area: Area;
-  kind: "puzzles" | "game" | "review" | "rush" | "endgame" | "openings" | "woodpecker" | "daily";
+  kind: "puzzles" | "game" | "review" | "rush" | "endgame" | "openings" | "woodpecker" | "daily" | "lesson";
   minutes: number;
   title: string;
   theme?: string | null;

@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Chess } from "chess.js";
 import confetti from "canvas-confetti";
-import Board, { toDests, type Color, type DrawShape, type Key } from "../components/Board";
+import Board, { isPromotion, toDests, uciToKeys, type Color, type DrawShape, type Key } from "../components/Board";
 import Promotion from "../components/Promotion";
 import { api } from "../lib/api";
+import { Engine, EngineClosedError } from "../lib/engine";
 import { themeLabel } from "../lib/labels";
 import { sound } from "../lib/sound";
-import type { Puzzle } from "../lib/types";
+import type { Area, Puzzle } from "../lib/types";
 import { useActivity } from "../lib/useActivity";
 import { usePuzzle } from "../lib/usePuzzle";
 
@@ -52,7 +53,18 @@ interface PracticeStep extends StepBase {
   theme: string;
   count: number;
 }
-type Step = ExplainStep | SelectStep | MoveStep | ChoiceStep | PracticeStep;
+interface PlayStep extends StepBase {
+  type: "play";
+  fen: string;
+  /** mate: dar mate · win: mate, o dejar al rival con el rey solo conservando dama o torre · draw: aguantar */
+  goal: "mate" | "win" | "draw";
+  moves: number;
+  /** Tu color, si empieza moviendo el rival (por defecto, el bando que mueve en `fen`) */
+  color?: Color;
+  hint: string;
+  success: string;
+}
+type Step = ExplainStep | SelectStep | MoveStep | ChoiceStep | PracticeStep | PlayStep;
 
 interface LessonProgress {
   step: number;
@@ -60,6 +72,7 @@ interface LessonProgress {
 }
 interface Lesson {
   id: string;
+  course: string;
   title: string;
   summary: string;
   course_title: string;
@@ -79,6 +92,16 @@ interface Course {
 /** SAN en notación española: C caballo, A alfil, T torre, D dama, R rey. */
 const PIECE_ES: Record<string, string> = { K: "R", Q: "D", R: "T", B: "A", N: "C" };
 const sanEs = (san: string) => san.replace(/[KQRBN]/g, (p) => PIECE_ES[p]);
+const GOAL_TEXT = { mate: "Da jaque mate", win: "Gana la partida", draw: "Consigue las tablas" };
+
+// Área en la que cuenta el tiempo de cada curso (igual que LEARN_AREA en backend/app/coach.py)
+const COURSE_AREA: Record<string, Area> = {
+  mates: "tactics",
+  tactica: "tactics",
+  estrategia: "play",
+  aperturas: "openings",
+  finales: "endgames",
+};
 const sameSan = (a: string, b: string) => a.replace(/[+#]/g, "") === b.replace(/[+#]/g, "");
 
 function stepShapes(step: StepBase): DrawShape[] {
@@ -150,7 +173,7 @@ function LessonPlayer({ id }: { id: string }) {
   const [index, setIndex] = useState(0);
   const [mistakes, setMistakes] = useState(0);
   const [result, setResult] = useState<LessonProgress | null>(null);
-  useActivity("tactics", "learn", id);
+  useActivity(lesson ? (COURSE_AREA[lesson.course] ?? "tactics") : null, "learn", id);
 
   useEffect(() => {
     api<Lesson>(`/learn/${id}`)
@@ -253,6 +276,8 @@ function LessonPlayer({ id }: { id: string }) {
       return <Choice key={index} step={step} {...props} />;
     case "practice":
       return <Practice key={index} step={step} {...props} />;
+    case "play":
+      return <Play key={index} step={step} {...props} />;
   }
 }
 
@@ -654,6 +679,253 @@ function Practice({ step, header, onNext }: StepProps<PracticeStep>) {
       {finishedPuzzle && !allDone && !error && (
         <button className="btn-primary w-full" onClick={load}>
           Siguiente puzzle ({results.length + 1} de {step.count})
+        </button>
+      )}
+    </StepLayout>
+  );
+}
+
+// --- Jugar contra Stockfish --------------------------------------------------------------
+
+/** ¿Tiene el bando `color` solo el rey? */
+function bareKing(chess: Chess, color: "w" | "b") {
+  return chess.board().flat().filter((p) => p && p.color === color).length === 1;
+}
+
+function Play({ step, header, onNext, onMistake }: StepProps<PlayStep>) {
+  const chess = useRef(new Chess(step.fen));
+  const engine = useRef<Engine | null>(null);
+  const [fen, setFen] = useState(step.fen);
+  const [last, setLast] = useState<Key[] | undefined>();
+  const [status, setStatus] = useState<"playing" | "won" | "lost">("playing");
+  const [reason, setReason] = useState("");
+  const [userMoves, setUserMoves] = useState(0);
+  const [thinking, setThinking] = useState(false);
+  const [promo, setPromo] = useState<{ from: Key; to: Key } | null>(null);
+  const [hint, setHint] = useState<DrawShape[]>([]);
+  const [round, setRound] = useState(0);
+  const finished = useRef(false);
+  const counted = useRef(false);
+  const myColor: Color = step.color ?? (step.fen.split(" ")[1] === "w" ? "white" : "black");
+  const me = myColor === "white" ? "w" : "b";
+
+  const finish = useCallback(
+    (success: boolean, why: string) => {
+      if (finished.current) return;
+      finished.current = true;
+      setStatus(success ? "won" : "lost");
+      setReason(why);
+      if (success) {
+        sound.good();
+        confetti({ particleCount: 70, spread: 70, origin: { y: 0.6 }, disableForReducedMotion: true });
+      } else {
+        sound.bad();
+        if (!counted.current) {
+          counted.current = true;
+          onMistake();
+        }
+      }
+    },
+    [onMistake],
+  );
+
+  /** Comprueba el objetivo tras cualquier jugada. Devuelve true si el ejercicio ha terminado. */
+  const check = useCallback(
+    async (moves: number): Promise<boolean> => {
+      const c = chess.current;
+      if (c.isCheckmate()) {
+        if (c.turn() === me) finish(false, "Te han dado mate.");
+        else finish(step.goal !== "draw", step.goal === "draw" ? "Has dado mate… pero aquí se trataba de aguantar." : "¡Jaque mate!");
+        return true;
+      }
+      if (c.isDraw()) {
+        const why = c.isStalemate()
+          ? "Rey ahogado."
+          : c.isThreefoldRepetition()
+            ? "Triple repetición."
+            : c.isInsufficientMaterial()
+              ? "Material insuficiente."
+              : "Regla de los 50 movimientos.";
+        finish(step.goal === "draw", step.goal === "draw" ? `¡Tablas! ${why}` : `Tablas: ${why} Había que ganar.`);
+        return true;
+      }
+      const opp = me === "w" ? "b" : "w";
+      if (step.goal === "win" && c.turn() === opp && bareKing(c, opp)) {
+        // Victoria si conservas dama o torre y el rival no puede capturarla en su jugada
+        const heavy = c.board().flat().filter((p) => p && p.color === me && (p.type === "q" || p.type === "r"));
+        const canCapture = c.moves({ verbose: true }).some((m) => m.captured === "q" || m.captured === "r");
+        if (heavy.length && !canCapture) {
+          finish(true, "El rival se ha quedado solo con el rey: victoria asegurada.");
+          return true;
+        }
+      }
+      if (moves >= step.moves && c.turn() !== me) {
+        if (step.goal === "draw") {
+          const r = await engine.current?.evaluate(c.fen(), 14).catch(() => null);
+          if (!r) return true; // motor cerrado (reinicio o cambio de paso)
+          const mine = me === "w" ? r.cp : -r.cp;
+          finish(mine >= -150, mine >= -150 ? "Has aguantado: la posición es de tablas." : "Has aguantado las jugadas, pero la posición está perdida.");
+        } else {
+          finish(false, `Se acabaron las ${step.moves} jugadas.`);
+        }
+        return true;
+      }
+      return false;
+    },
+    [finish, me, step.goal, step.moves],
+  );
+
+  const engineMove = useCallback(
+    async (moves: number) => {
+      const eng = engine.current;
+      if (!eng || finished.current) return;
+      setThinking(true);
+      const fenBefore = chess.current.fen();
+      try {
+        const uci = await eng.bestMove(fenBefore, "movetime 500");
+        // Si mientras pensaba se reinició el ejercicio, su jugada ya no vale
+        if (finished.current || chess.current.fen() !== fenBefore || !uci || uci === "(none)") return;
+        const [from, to] = uciToKeys(uci);
+        const m = chess.current.move({ from, to, promotion: uci[4] ?? "q" });
+        setLast([from, to]);
+        setFen(chess.current.fen());
+        if (chess.current.inCheck()) sound.check();
+        else if (m.captured) sound.capture();
+        else sound.move();
+        await check(moves);
+      } catch (e) {
+        if (!(e instanceof EngineClosedError)) console.error(e);
+      } finally {
+        setThinking(false);
+      }
+    },
+    [check],
+  );
+
+  useEffect(() => {
+    const eng = new Engine();
+    engine.current = eng;
+    eng
+      .setOptions([["UCI_LimitStrength", "false"], ["Skill Level", 20], ["Hash", 32]])
+      .then(() => eng.newGame())
+      .then(() => {
+        if (chess.current.turn() !== me) engineMove(0);
+      })
+      .catch(() => undefined); // motor cerrado antes de arrancar
+    return () => {
+      eng.terminate();
+      engine.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round]);
+
+  async function onMove(from: Key, to: Key, promotion?: string) {
+    if (status !== "playing" || thinking) return;
+    if (!promotion && isPromotion(chess.current, from, to)) {
+      setPromo({ from, to });
+      return;
+    }
+    let m;
+    try {
+      m = chess.current.move({ from, to, promotion });
+    } catch {
+      setFen(chess.current.fen());
+      return;
+    }
+    setHint([]);
+    setLast([from, to]);
+    setFen(chess.current.fen());
+    if (chess.current.inCheck()) sound.check();
+    else if (m.captured) sound.capture();
+    else sound.move();
+    const moves = userMoves + 1;
+    setUserMoves(moves);
+    if (!(await check(moves))) engineMove(moves);
+  }
+
+  async function showHint() {
+    if (!engine.current || status !== "playing" || thinking) return;
+    const r = await engine.current.evaluate(chess.current.fen(), 16).catch(() => null);
+    if (r?.pv[0]) {
+      const [orig, dest] = uciToKeys(r.pv[0]);
+      setHint([{ orig, dest, brush: "green" }]);
+    }
+  }
+
+  function restart() {
+    chess.current = new Chess(step.fen);
+    finished.current = false;
+    setFen(step.fen);
+    setLast(undefined);
+    setStatus("playing");
+    setReason("");
+    setUserMoves(0);
+    setHint([]);
+    setRound((r) => r + 1);
+  }
+
+  const yourTurn = status === "playing" && !thinking && chess.current.turn() === me;
+  const left = Math.max(0, step.moves - userMoves);
+
+  return (
+    <StepLayout
+      header={header}
+      board={
+        <Board
+          fen={fen}
+          orientation={step.orientation ?? myColor}
+          movable={yourTurn ? myColor : undefined}
+          dests={yourTurn ? toDests(chess.current) : undefined}
+          lastMove={last}
+          check={chess.current.inCheck()}
+          shapes={hint.length ? hint : userMoves === 0 ? stepShapes(step) : []}
+          onMove={(f, t) => onMove(f, t)}
+        />
+      }
+      overlay={
+        promo && (
+          <Promotion
+            color={myColor}
+            onPick={(role) => {
+              const m = promo;
+              setPromo(null);
+              onMove(m.from, m.to, role);
+            }}
+            onCancel={() => {
+              setPromo(null);
+              setFen(chess.current.fen());
+            }}
+          />
+        )
+      }
+    >
+      <StepText step={step} />
+      {status === "playing" ? (
+        <Feedback kind="info">
+          {GOAL_TEXT[step.goal]} contra Stockfish a máxima fuerza.{" "}
+          {step.goal === "draw" ? `Aguanta ${left} jugada${left === 1 ? "" : "s"} más.` : `Te quedan ${left} jugada${left === 1 ? "" : "s"}.`}
+          {thinking && <span className="block text-muted">Stockfish piensa…</span>}
+        </Feedback>
+      ) : (
+        <Feedback kind={status === "won" ? "good" : "bad"}>
+          {reason}
+          {status === "won" && <span className="block font-normal">{step.success}</span>}
+          {status === "lost" && <span className="block font-normal">{step.hint}</span>}
+        </Feedback>
+      )}
+      <div className="flex gap-2">
+        {status === "playing" && (
+          <button className="btn-ghost flex-1" onClick={showHint} disabled={!yourTurn}>
+            Pista
+          </button>
+        )}
+        <button className="btn-ghost flex-1" onClick={restart}>
+          {status === "lost" ? "Reintentar" : "Reiniciar"}
+        </button>
+      </div>
+      {status === "won" && (
+        <button className="btn-primary w-full" onClick={onNext}>
+          Continuar
         </button>
       )}
     </StepLayout>

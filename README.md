@@ -25,6 +25,7 @@ los que falten. También puedes dejar el fichero
 | Jugar | Stockfish 17.1 en el navegador (ELO 400–3000, modo Escalera +50/−25) o Maia 1100–1900 (juego humano, lc0). Relojes 15+10, 30+0, 10+5 y 5+3 |
 | Revisión | Primero anotas tus dudas, después el motor: gráfica de evaluación, imprecisión/error/error grave, mejor jugada con flecha, línea principal, precisión y desviación del repertorio |
 | Puzzles | Base de Lichess con ELO propio, filtros por tema, pistas y cola de repaso de fallos (1, 3, 7 y 21 días) |
+| Aprender | 76 lecciones prácticas en 5 cursos (mates de patrón, táctica, estrategia, finales y principios de apertura): teoría corta con el tablero, ejercicios de pulsar, elegir y jugar, partidas contra Stockfish y puzzles reales del tema. Comprobadas con Stockfish (`docker compose exec worker python -m app.check_learn`) |
 | Contrarreloj | 3 o 5 minutos, dificultad creciente, tres fallos y fuera, récord y gráfica |
 | Finales | 14 lecciones teóricas (mates básicos, rey y peón, oposición, Lucena, Philidor…) contra Stockfish a máxima fuerza, con ELO de finales y repaso espaciado |
 | Aperturas | Repertorio propio en árbol, entrenamiento SM-2, nombres de `chess-openings` y detección de dónde te sales en tus partidas |

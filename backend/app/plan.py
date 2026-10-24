@@ -4,13 +4,24 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .coach import AREA_LABEL, fresh_themes, today_plan, unreviewed_game, weak_themes
+from .coach import (
+    AREA_LABEL,
+    fresh_themes,
+    lesson_for_themes,
+    lesson_step,
+    next_learn_lesson,
+    today_plan,
+    unreviewed_game,
+    weak_themes,
+)
+from .learn import BY_ID as LEARN_BY_ID
 from .lessons import BY_ID, LESSONS
 from .models import (
     DailyChallenge,
     DailyPlan,
     EndgameAttempt,
     Game,
+    LessonProgress,
     RepertoireLine,
     ReviewItem,
     RushRun,
@@ -88,6 +99,16 @@ def _progress(db: Session, user: User, step: dict, plan: DailyPlan) -> tuple[flo
             RushRun.user_id == user.id, RushRun.created_at >= since, RushRun.minutes == step["minutes"]))
         return (1.0, "Hecho", {}) if runs else (0.0, "Sin hacer", {})
 
+    if kind == "lesson":
+        p = db.scalars(select(LessonProgress).where(
+            LessonProgress.user_id == user.id, LessonProgress.lesson_id == step["lesson_id"])).first()
+        total = len(LEARN_BY_ID[step["lesson_id"]]["steps"]) if step["lesson_id"] in LEARN_BY_ID else 1
+        if p and p.completed_at and p.completed_at >= since:
+            return 1.0, "Hecha", {}
+        if p and p.step:
+            return min(0.95, p.step / total), f"Paso {p.step + 1} de {total}", {}
+        return 0.0, "Sin empezar", {}
+
     if kind == "daily":
         available = (daily_puzzle(db) is not None) + (own_position(db, user) is not None)
         done = db.scalar(select(func.count()).select_from(DailyChallenge).where(
@@ -158,7 +179,18 @@ def suggestions(db: Session, user: User, limit: int = 4) -> list[dict]:
         out.append({"area": "endgames", "kind": "endgame", "lesson_id": endgames_due[0], "minutes": 10,
                     "title": f"Final: {BY_ID[endgames_due[0]]['title']}", "reason": "Toca repasar esta posición teórica."})
 
-    # 2. Áreas por detrás de su objetivo semanal, de más a menos retraso
+    # 2. Una lección de Aprender, si hoy no has hecho ninguna: la de tu tema flojo o, si no, la siguiente
+    lesson_today = db.scalar(select(func.count()).select_from(LessonProgress).where(
+        LessonProgress.user_id == user.id, LessonProgress.completed_at >= local_midnight(today())))
+    if not lesson_today:
+        weak_for_lesson = [t["theme"] for t in weak_themes(db, user.id)]
+        lesson = lesson_for_themes(db, user.id, weak_for_lesson)
+        if lesson:
+            out.append(lesson_step(lesson, "Es tu tema más flojo: primero la idea, luego los ejercicios."))
+        elif lesson := next_learn_lesson(db, user.id):
+            out.append(lesson_step(lesson, "Aprende algo nuevo: teoría corta con ejercicios en el tablero."))
+
+    # 3. Áreas por detrás de su objetivo semanal, de más a menos retraso
     split = effective_split(user)
     week = seconds_by_area(db, user.id, week_start())
     target = {a: user.weekly_hours * 3600 * pct / 100 for a, pct in split.items()}
@@ -203,7 +235,7 @@ def suggestions(db: Session, user: User, limit: int = 4) -> list[dict]:
                         "title": "Entrena tu repertorio" if has_repertoire else "Crea tu repertorio de aperturas",
                         "reason": why})
 
-    # 3. Siempre hay algo divertido con lo que cerrar
+    # 4. Siempre hay algo divertido con lo que cerrar
     best = db.scalar(select(func.max(RushRun.score)).where(RushRun.user_id == user.id, RushRun.minutes == 3))
     out.append({"area": "tactics", "kind": "rush", "minutes": 3, "title": "Contrarreloj de 3 minutos",
                 "reason": f"Intenta batir tu récord de {best}." if best else "Pon a prueba tu velocidad."})
