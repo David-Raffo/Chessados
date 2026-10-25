@@ -15,11 +15,10 @@ from .coach import (
     weak_themes,
 )
 from .learn import BY_ID as LEARN_BY_ID
-from .lessons import BY_ID, LESSONS
+from .learn import OLD_ENDGAMES
 from .models import (
     DailyChallenge,
     DailyPlan,
-    EndgameAttempt,
     Game,
     LessonProgress,
     RepertoireLine,
@@ -54,18 +53,15 @@ def _progress(db: Session, user: User, step: dict, plan: DailyPlan) -> tuple[flo
     """Devuelve (progreso 0..1, texto, datos extra) de un paso según lo que has hecho hoy."""
     since = local_midnight(today())
     kind = step["kind"]
+    if kind == "endgame" and step.get("lesson_id") in OLD_ENDGAMES:
+        # Planes fijados antes de unificar los finales: el paso es ahora su lección de Aprender
+        step = {**step, "kind": "lesson", "lesson_id": OLD_ENDGAMES[step["lesson_id"]]}
+        kind = "lesson"
 
     if kind in TIMED:
         area, activities = TIMED[kind]
         secs = _seconds(db, user, area, activities, since)
         target = max(60, step["minutes"] * 60)
-        if kind == "endgame" and step.get("lesson_id"):
-            # Conseguir la lección propuesta también completa el paso
-            won = db.scalar(select(func.count()).select_from(EndgameAttempt).where(
-                EndgameAttempt.user_id == user.id, EndgameAttempt.lesson_id == step["lesson_id"],
-                EndgameAttempt.success.is_(True), EndgameAttempt.created_at >= since))
-            if won:
-                return 1.0, "Lección conseguida", {"seconds": secs, "target_seconds": target}
         return min(1.0, secs / target), f"{secs // 60} de {step['minutes']} min", {"seconds": secs, "target_seconds": target}
 
     if kind == "game":
@@ -174,10 +170,6 @@ def suggestions(db: Session, user: User, limit: int = 4) -> list[dict]:
         out.append({"area": "openings", "kind": "openings", "minutes": 10,
                     "title": f"Repasa {len(openings_due)} jugada{'s' if len(openings_due) > 1 else ''} de tu repertorio",
                     "reason": "Toca repasarlas hoy según la repetición espaciada."})
-    endgames_due = [i for i in _due(db, user, "endgame") if i in BY_ID]
-    if endgames_due:
-        out.append({"area": "endgames", "kind": "endgame", "lesson_id": endgames_due[0], "minutes": 10,
-                    "title": f"Final: {BY_ID[endgames_due[0]]['title']}", "reason": "Toca repasar esta posición teórica."})
 
     # 2. Una lección de Aprender, si hoy no has hecho ninguna: la de tu tema flojo o, si no, la siguiente
     lesson_today = db.scalar(select(func.count()).select_from(LessonProgress).where(
@@ -201,8 +193,6 @@ def suggestions(db: Session, user: User, limit: int = 4) -> list[dict]:
     has_repertoire = db.scalar(select(func.count()).select_from(RepertoireLine).where(RepertoireLine.user_id == user.id))
     woodpecker = db.scalar(select(func.count()).select_from(WoodpeckerSet).where(
         WoodpeckerSet.user_id == user.id, WoodpeckerSet.active.is_(True)))
-    won = set(db.scalars(select(EndgameAttempt.lesson_id).where(
-        EndgameAttempt.user_id == user.id, EndgameAttempt.success.is_(True))))
     for area in behind:
         done_min, target_min = round(week.get(area, 0) / 60), round(target[area] / 60)
         why = f"Esta semana llevas {done_min} de {target_min} min de {AREA_LABEL[area].lower()}."
@@ -223,10 +213,9 @@ def suggestions(db: Session, user: User, limit: int = 4) -> list[dict]:
         elif area == "play" and not (pending and user.review_lock):  # bloqueada hasta revisar
             out.append({"area": "play", "kind": "game", "minutes": 30, "title": "Otra partida 15+10", "reason": why})
         elif area == "endgames":
-            lesson = next((l for l in LESSONS if l["id"] not in won), None)
+            lesson = None if any(s["kind"] == "lesson" for s in out) else next_learn_lesson(db, user.id, "finales")
             if lesson:
-                out.append({"area": "endgames", "kind": "endgame", "lesson_id": lesson["id"], "minutes": 15,
-                            "title": f"Final: {lesson['title']}", "reason": why})
+                out.append(lesson_step(lesson, why))
             else:
                 out.append({"area": "endgames", "kind": "puzzles", "theme": "endgame", "minutes": 15,
                             "title": "Puzzles de finales", "reason": why})

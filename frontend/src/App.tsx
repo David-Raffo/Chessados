@@ -2,13 +2,12 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import { useAuth } from "./lib/auth";
 import Daily from "./pages/Daily";
-import Endgames from "./pages/Endgames";
 import Games from "./pages/Games";
 import More from "./pages/More";
 import Openings from "./pages/Openings";
 import Woodpecker from "./pages/Woodpecker";
 import Home from "./pages/Home";
-import Learn from "./pages/Learn";
+import Learn, { OldEndgameRedirect } from "./pages/Learn";
 import Login from "./pages/Login";
 import Play from "./pages/Play";
 import Progress from "./pages/Progress";
@@ -50,8 +49,9 @@ export default function App() {
         <Route path="partidas" element={<Games />} />
         <Route path="revision/:id" element={<Review />} />
         <Route path="progreso" element={<Progress />} />
-        <Route path="finales" element={<Endgames />} />
-        <Route path="finales/:id" element={<Endgames />} />
+        {/* Los finales viven ahora en Aprender; las direcciones antiguas siguen funcionando */}
+        <Route path="finales" element={<Navigate to="/aprender?curso=finales" replace />} />
+        <Route path="finales/:id" element={<OldEndgameRedirect />} />
         <Route path="aperturas" element={<Openings />} />
         <Route path="woodpecker" element={<Woodpecker />} />
         <Route path="retos" element={<Daily />} />

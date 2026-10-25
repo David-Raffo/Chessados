@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from .db import Base, engine
+from .learn import OLD_ENDGAMES
 from .routers import daily, endgames, games, learn, maia, openings, puzzles, sessions, stats, users, woodpecker
 
 
@@ -37,6 +38,18 @@ def migrate(conn) -> None:
         conn.execute(text("UPDATE users SET is_admin = true WHERE id = (SELECT min(id) FROM users)"))
 
 
+def migrate_old_endgames(conn) -> None:
+    """Cada final ganado en la antigua pantalla «Finales» queda como lección hecha en Aprender."""
+    values = ", ".join(f"('{old}', '{new}')" for old, new in OLD_ENDGAMES.items())
+    conn.execute(text(
+        "INSERT INTO lesson_progress (user_id, lesson_id, step, completed_at) "
+        f"SELECT a.user_id, m.new, 0, min(a.created_at) FROM endgame_attempts a JOIN (VALUES {values}) AS m(old, new) "
+        "ON m.old = a.lesson_id WHERE a.success GROUP BY a.user_id, m.new "
+        "ON CONFLICT (user_id, lesson_id) DO UPDATE SET completed_at = "
+        "COALESCE(lesson_progress.completed_at, EXCLUDED.completed_at)"
+    ))
+
+
 def init_db(retries: int = 30) -> None:
     """Crea las tablas; espera a que PostgreSQL acepte conexiones al arrancar con compose."""
     for attempt in range(retries):
@@ -46,6 +59,7 @@ def init_db(retries: int = 30) -> None:
                 conn.execute(text("SELECT pg_advisory_xact_lock(4242)"))
                 migrate(conn)
                 Base.metadata.create_all(conn)
+                migrate_old_endgames(conn)
             return
         except OperationalError:
             if attempt == retries - 1:

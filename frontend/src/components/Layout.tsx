@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import PlanBanner from "./PlanBanner";
 
@@ -8,7 +8,7 @@ export const MODULES = [
   { to: "/puzzles", label: "Puzzles", icon: "M10 3a2 2 0 014 0v2h4a1 1 0 011 1v4h-2a2 2 0 000 4h2v4a1 1 0 01-1 1h-4v-2a2 2 0 00-4 0v2H6a1 1 0 01-1-1v-4h2a2 2 0 000-4H5V6a1 1 0 011-1h4z" },
   { to: "/aprender", label: "Aprender", icon: "M12 3L1 9l11 6 9-4.9V17h2V9zM5 13.2v4L12 21l7-3.8v-4L12 17z" },
   { to: "/contrarreloj", label: "Contrarreloj", icon: "M12 22a9 9 0 110-18 9 9 0 010 18zm0-2a7 7 0 100-14 7 7 0 000 14zm1-11v4.6l3 1.8-1 1.6-4-2.4V9zM9 1h6v2H9z" },
-  { to: "/finales", label: "Finales", icon: "M7 21h10v-2H7zm1-4h8l-1-6h2V9h-3.2A3 3 0 0012 4a3 3 0 00-1.8 5H7v2h2z" },
+  { to: "/aprender?curso=finales", label: "Finales", icon: "M7 21h10v-2H7zm1-4h8l-1-6h2V9h-3.2A3 3 0 0012 4a3 3 0 00-1.8 5H7v2h2z" },
   { to: "/aperturas", label: "Aperturas", icon: "M4 5a2 2 0 012-2h5v18H6a2 2 0 01-2-2zm9-2h5a2 2 0 012 2v14a2 2 0 01-2 2h-5z" },
   { to: "/woodpecker", label: "Woodpecker", icon: "M4 12a8 8 0 0114-5.3V4h2v7h-7V9h3.5A6 6 0 106 12z" },
   { to: "/retos", label: "Desafíos", icon: "M12 2l3 6.5 7 .8-5.2 4.8 1.4 7L12 17.6 5.8 21l1.4-7L2 9.3l7-.8z" },
@@ -26,6 +26,10 @@ function Icon({ d }: { d: string }) {
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  // «Finales» es un curso de Aprender: cada botón se ilumina solo en lo suyo
+  const inFinales = location.pathname === "/aprender" && location.search.includes("curso=finales");
+  const active = (to: string, isActive: boolean) => (to.includes("?") ? inFinales : isActive && !(to === "/aprender" && inFinales));
   return (
     <div className="flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-line bg-panel p-4 md:flex">
@@ -41,7 +45,7 @@ export default function Layout() {
               end={l.to === "/"}
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-xl px-3 py-2 font-medium transition ${
-                  isActive ? "bg-panel2 text-fg" : "text-muted hover:bg-panel2 hover:text-fg"
+                  active(l.to, isActive) ? "bg-panel2 text-fg" : "text-muted hover:bg-panel2 hover:text-fg"
                 }`
               }
             >

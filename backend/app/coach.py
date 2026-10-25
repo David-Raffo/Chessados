@@ -6,10 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import learn
-from .lessons import LESSONS
 from .models import (
     DailyChallenge,
-    EndgameAttempt,
     Game,
     GameAnalysis,
     LessonProgress,
@@ -105,7 +103,7 @@ def fresh_themes(db: Session, user_id: int) -> list[str]:
 
 
 # Área en la que cuenta el tiempo de cada curso de Aprender
-LEARN_AREA = {"mates": "tactics", "tactica": "tactics", "estrategia": "play", "finales": "endgames", "aperturas": "openings"}
+LEARN_AREA = {"mates": "tactics", "tactica": "tactics", "pensar": "tactics", "estrategia": "play", "finales": "endgames", "aperturas": "openings"}
 
 
 def completed_lessons(db: Session, user_id: int) -> set[str]:
@@ -124,11 +122,11 @@ def lesson_for_themes(db: Session, user_id: int, themes: list[str]) -> dict | No
     return None
 
 
-def next_learn_lesson(db: Session, user_id: int) -> dict | None:
-    """Siguiente lección sin completar, en el orden del temario."""
+def next_learn_lesson(db: Session, user_id: int, course: str | None = None) -> dict | None:
+    """Siguiente lección sin completar, en el orden del temario (de un curso, si se indica)."""
     done = completed_lessons(db, user_id)
-    return next((learn.BY_ID[lid] for c in learn.COURSES for lid, _, _ in c["outline"]
-                 if lid in learn.BY_ID and lid not in done), None)
+    return next((learn.BY_ID[lid] for c in learn.COURSES if course in (None, c["id"])
+                 for lid, _, _ in c["outline"] if lid in learn.BY_ID and lid not in done), None)
 
 
 def lesson_step(lesson: dict, reason: str | None = None) -> dict:
@@ -255,12 +253,7 @@ def today_plan(db: Session, user: User) -> dict:
         advice.append({"rule": 5, "area": area, "text": f"Tu ELO de {AREA_LABEL[area]} no sube en 4 semanas. {tip}",
                        "link": "/woodpecker" if area == "tactics" else None})
 
-    # Estado de los módulos de finales, aperturas, Woodpecker y desafíos
-    endgame_due = db.scalars(select(ReviewItem.ref_id).where(
-        ReviewItem.user_id == user.id, ReviewItem.kind == "endgame", ReviewItem.due_date <= today())).all()
-    tried = set(db.scalars(select(EndgameAttempt.lesson_id).where(
-        EndgameAttempt.user_id == user.id, EndgameAttempt.success.is_(True))))
-    next_lesson = next((l for l in LESSONS if l["id"] not in tried), None)
+    # Estado de los módulos de aperturas, Woodpecker y desafíos
     opening_due = db.scalar(select(func.count()).select_from(ReviewItem).where(
         ReviewItem.user_id == user.id, ReviewItem.kind == "opening", ReviewItem.due_date <= today()))
     has_repertoire = db.scalar(select(func.count()).select_from(RepertoireLine).where(
@@ -296,13 +289,11 @@ def today_plan(db: Session, user: User) -> dict:
         tactics_theme = themed_lesson["theme"]
 
     # Construcción de la sesión de hoy
-    if endgame_due:
-        endgame_block = {"area": "endgames", "kind": "endgame", "minutes": round(minutes * 0.2),
-                         "title": f"Repasa {len(endgame_due)} final{'es' if len(endgame_due) > 1 else ''} teórico{'s' if len(endgame_due) > 1 else ''}",
-                         "lesson_id": endgame_due[0]}
-    elif next_lesson:
-        endgame_block = {"area": "endgames", "kind": "endgame", "minutes": round(minutes * 0.2),
-                         "title": f"Final: {next_lesson['title']}", "lesson_id": next_lesson["id"]}
+    # Finales: la siguiente lección del curso de Aprender, salvo que hoy ya toque una lección de táctica
+    # (como mucho una al día); si no, puzzles de finales.
+    endgame_lesson = None if themed_lesson else next_learn_lesson(db, user.id, "finales")
+    if endgame_lesson:
+        endgame_block = lesson_step(endgame_lesson)
     else:
         endgame_block = {"area": "endgames", "kind": "puzzles", "minutes": round(minutes * 0.2),
                          "title": "Puzzles de finales", "theme": "endgame"}

@@ -26,7 +26,8 @@ export function stepLink(s: PlanStep): string {
     case "rush":
       return `/contrarreloj?min=${s.minutes === 5 ? 5 : 3}`;
     case "endgame":
-      return s.lesson_id ? `/finales/${s.lesson_id}` : "/finales";
+      // Planes de antes de unificar los finales: /finales redirige a su lección de Aprender
+      return s.lesson_id ? `/finales/${s.lesson_id}` : "/aprender?curso=finales";
     case "openings":
       return "/aperturas?tab=train";
     case "woodpecker":

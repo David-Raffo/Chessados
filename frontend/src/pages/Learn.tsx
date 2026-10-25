@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Chess } from "chess.js";
 import confetti from "canvas-confetti";
 import Board, { isPromotion, toDests, uciToKeys, type Color, type DrawShape, type Key } from "../components/Board";
@@ -98,6 +98,7 @@ const GOAL_TEXT = { mate: "Da jaque mate", win: "Gana la partida", draw: "Consig
 const COURSE_AREA: Record<string, Area> = {
   mates: "tactics",
   tactica: "tactics",
+  pensar: "tactics",
   estrategia: "play",
   aperturas: "openings",
   finales: "endgames",
@@ -113,6 +114,30 @@ function stepShapes(step: StepBase): DrawShape[] {
 
 // --- Página -------------------------------------------------------------------
 
+// Lecciones de la antigua pantalla «Finales» y su lección en Aprender (igual que OLD_ENDGAMES en backend/app/learn.py)
+const OLD_ENDGAMES: Record<string, string> = {
+  "mate-dos-torres": "final-dos-torres",
+  "mate-dama": "final-dama",
+  "mate-torre": "final-torre",
+  "mate-dos-alfiles": "final-dos-alfiles",
+  "mate-alfil-caballo": "final-alfil-caballo",
+  "rp-sexta": "final-rey-delante",
+  "rp-oposicion": "final-oposicion",
+  "rp-cuadrado": "final-cuadrado",
+  "rp-defensa": "final-defensa-oposicion",
+  "rp-defensa-final": "final-bloquear-peon",
+  "rp-torre": "final-peon-torre",
+  "torre-lucena": "final-lucena",
+  "torre-philidor": "final-philidor",
+  "dama-peon": "final-dama-peon",
+};
+
+export function OldEndgameRedirect() {
+  const { id } = useParams();
+  const target = id && OLD_ENDGAMES[id];
+  return <Navigate to={target ? `/aprender/${target}` : "/aprender?curso=finales"} replace />;
+}
+
 export default function Learn() {
   const { id } = useParams();
   return id ? <LessonPlayer key={id} id={id} /> : <Courses />;
@@ -120,9 +145,15 @@ export default function Learn() {
 
 function Courses() {
   const [courses, setCourses] = useState<Course[] | null>(null);
+  const [params] = useSearchParams();
+  const focus = params.get("curso");
   useEffect(() => {
     api<{ courses: Course[] }>("/learn").then((r) => setCourses(r.courses));
   }, []);
+  // ?curso=finales lleva directamente a ese curso (el botón «Finales» del menú)
+  useEffect(() => {
+    if (courses && focus) document.getElementById(`curso-${focus}`)?.scrollIntoView({ block: "start" });
+  }, [courses, focus]);
 
   return (
     <div className="space-y-6">
@@ -132,7 +163,7 @@ function Courses() {
       </header>
       {!courses && <p className="text-muted">Cargando…</p>}
       {courses?.map((c) => (
-        <section key={c.id} className="space-y-3">
+        <section key={c.id} id={`curso-${c.id}`} className="scroll-mt-4 space-y-3">
           <div>
             <h2 className="text-lg font-bold">{c.title}</h2>
             <p className="text-sm text-muted">{c.description}</p>
@@ -265,6 +296,8 @@ function LessonPlayer({ id }: { id: string }) {
   }
 
   const props = { header, onNext: next, onMistake: addMistake };
+  // Los puzzles de práctica del curso de finales cuentan para tu ELO de finales
+  const practiceArea = lesson.course === "finales" ? "endgames" : "tactics";
   switch (step.type) {
     case "explain":
       return <Explain key={index} step={step} {...props} />;
@@ -275,7 +308,7 @@ function LessonPlayer({ id }: { id: string }) {
     case "choice":
       return <Choice key={index} step={step} {...props} />;
     case "practice":
-      return <Practice key={index} step={step} {...props} />;
+      return <Practice key={index} step={step} area={practiceArea} {...props} />;
     case "play":
       return <Play key={index} step={step} {...props} />;
   }
@@ -598,24 +631,24 @@ function Choice({ step, header, onNext, onMistake }: StepProps<ChoiceStep>) {
 
 // --- Práctica con puzzles reales -------------------------------------------------------
 
-function Practice({ step, header, onNext }: StepProps<PracticeStep>) {
+function Practice({ step, header, onNext, area }: StepProps<PracticeStep> & { area: "tactics" | "endgames" }) {
   const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
   const [results, setResults] = useState<boolean[]>([]);
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
-    api<Puzzle>(`/puzzles/next?theme=${step.theme}&area=tactics`)
+    api<Puzzle>(`/puzzles/next?theme=${step.theme}&area=${area}`)
       .then(setPuzzle)
       .catch((e) => setError(e.message));
-  }, [step.theme]);
+  }, [step.theme, area]);
   useEffect(load, [load]);
 
   const p = usePuzzle(puzzle, {
     onDone: (solved, seconds) => {
       if (!puzzle) return;
       setResults((r) => [...r, solved]);
-      // Cuenta como un puzzle normal: mueve tu ELO de táctica
-      api(`/puzzles/${puzzle.id}/attempt`, { body: { solved, seconds, mode: "normal", area: "tactics" } }).catch(() => undefined);
+      // Cuenta como un puzzle normal: mueve tu ELO de táctica (o de finales)
+      api(`/puzzles/${puzzle.id}/attempt`, { body: { solved, seconds, mode: "normal", area } }).catch(() => undefined);
     },
   });
   const finishedPuzzle = p.status === "solved" || p.status === "failed";

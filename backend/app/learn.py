@@ -23,7 +23,7 @@ colores de chessground (green, red, blue, yellow).
 Antes de publicar, `python -m app.check_learn` comprueba las lecciones con Stockfish.
 """
 
-from .learn_data import aperturas, estrategia, finales, mates, tactica
+from .learn_data import aperturas, estrategia, finales, mates, pensar, tactica
 
 # Temario de cada curso: (id, título, tema de puzzles). Las lecciones que aún no existen en
 # learn_data se muestran como «próximamente».
@@ -69,6 +69,15 @@ COURSES = [
             ("despeje", "Despeje", "clearance"),
             ("ataque-f7", "El punto débil: f7 y f2", "attackingF2F7"),
             ("jugada-tranquila", "La jugada tranquila", "quietMove"),
+        ],
+    },
+    {
+        "id": "pensar",
+        "title": "Cómo pensar",
+        "description": "Hábitos que evitan los errores más caros: mirar qué quiere el rival y qué dejas al mover.",
+        "outline": [
+            ("amenazas-rival", "Las amenazas del rival", "defensiveMove"),
+            ("deja-de-defender", "Lo que deja de defender una pieza", "hangingPiece"),
         ],
     },
     {
@@ -141,6 +150,15 @@ COURSES = [
     },
 ]
 
-MODULES = {"mates": mates, "tactica": tactica, "estrategia": estrategia, "finales": finales, "aperturas": aperturas}
+# Lecciones de la antigua pantalla «Finales» (app/lessons.py) y su lección equivalente en Aprender
+OLD_ENDGAMES = {
+    "mate-dos-torres": "final-dos-torres", "mate-dama": "final-dama", "mate-torre": "final-torre",
+    "mate-dos-alfiles": "final-dos-alfiles", "mate-alfil-caballo": "final-alfil-caballo",
+    "rp-sexta": "final-rey-delante", "rp-oposicion": "final-oposicion", "rp-cuadrado": "final-cuadrado",
+    "rp-defensa": "final-defensa-oposicion", "rp-defensa-final": "final-bloquear-peon", "rp-torre": "final-peon-torre",
+    "torre-lucena": "final-lucena", "torre-philidor": "final-philidor", "dama-peon": "final-dama-peon",
+}
+
+MODULES = {"mates": mates, "tactica": tactica, "pensar": pensar, "estrategia": estrategia, "finales": finales, "aperturas": aperturas}
 LESSONS = [lesson for m in MODULES.values() for lesson in m.LESSONS]
 BY_ID = {lesson["id"]: lesson for lesson in LESSONS}
